@@ -1,6 +1,6 @@
 """Pydantic models for fiscal documents and validation."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -117,7 +117,9 @@ class InvoiceModel(BaseModel):
 
     # Additional metadata
     raw_xml: str | None = Field(None, description="Original XML (for storage)")
-    parsed_at: datetime = Field(default_factory=datetime.utcnow, description="Parse timestamp")
+    parsed_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), description="Parse timestamp"
+    )
 
     @field_validator("total_products", "total_taxes", "total_invoice", mode="before")
     @classmethod

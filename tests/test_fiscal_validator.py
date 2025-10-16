@@ -1,6 +1,6 @@
 """Unit tests for fiscal validator tool."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from src.models import (
@@ -20,7 +20,7 @@ def create_valid_invoice() -> InvoiceModel:
         document_key="35240112345678000190550010000000011234567890",
         document_number="1",
         series="1",
-        issue_date=datetime.utcnow() - timedelta(days=1),  # Yesterday
+        issue_date=datetime.now(UTC) - timedelta(days=1),  # Yesterday
         issuer_cnpj="12345678000190",
         issuer_name="EMPRESA TESTE LTDA",
         recipient_cnpj_cpf="98765432000100",
@@ -171,7 +171,7 @@ class TestFiscalValidatorTool:
         """Test that future issue date triggers warning."""
         validator = FiscalValidatorTool()
         invoice = create_valid_invoice()
-        invoice.issue_date = datetime.utcnow() + timedelta(days=1)  # Tomorrow
+        invoice.issue_date = datetime.now(UTC) + timedelta(days=1)  # Tomorrow
 
         issues = validator.validate(invoice)
         date_issues = [i for i in issues if i.code == "VAL010"]

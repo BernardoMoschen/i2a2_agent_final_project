@@ -3,6 +3,7 @@
 ## ✅ Completed (Phase 1 - Foundation)
 
 ### Core Infrastructure
+
 - **Project Structure**: Complete modular layout with `src/`, `tests/`, configuration files
 - **Dependencies**: All required packages installed in virtual environment (Python 3.13)
 - **Configuration**: `pyproject.toml`, `.gitignore`, `.env.example`, `requirements.txt`
@@ -11,6 +12,7 @@
 ### Implemented Components
 
 #### 1. **Pydantic Models** (`src/models/__init__.py`)
+
 - ✅ `DocumentType` enum (NFe, NFCe, CTe, MDFe)
 - ✅ `ValidationSeverity` enum (ERROR, WARNING, INFO)
 - ✅ `ValidationIssue` - structured validation output
@@ -20,6 +22,7 @@
 - ✅ `ClassificationResult` - LLM classification output
 
 #### 2. **XML Parser Tool** (`src/tools/xml_parser.py`)
+
 - ✅ Safe parsing with `defusedxml` (prevents XXE attacks)
 - ✅ NFe/NFCe full parser with item extraction, tax calculations, party details
 - ✅ Automatic document type detection (NFe vs NFCe by `mod` field)
@@ -28,6 +31,7 @@
 - ⚠️ CTe and MDFe parsers stubbed (not yet implemented)
 
 #### 3. **Fiscal Validator Tool** (`src/tools/fiscal_validator.py`)
+
 - ✅ Declarative rule-based validation framework
 - ✅ 10 built-in validation rules:
   - VAL001: Document key format (44 digits)
@@ -44,6 +48,7 @@
 - ✅ Custom rule support (`add_rule`, `remove_rule`)
 
 #### 4. **Streamlit UI** (`src/ui/app.py`)
+
 - ✅ Multi-tab interface: Upload, Chat, Validation, Reports
 - ✅ File upload widget (XML and ZIP support)
 - ✅ Chat interface with message history (placeholder for agent)
@@ -52,6 +57,7 @@
 - ✅ Placeholder visualizations and examples
 
 #### 5. **Unit Tests** (`tests/`)
+
 - ✅ `test_xml_parser.py` (8 tests):
   - Valid NFe parsing
   - Item detail extraction
@@ -68,6 +74,7 @@
 - ✅ **All 21 tests passing** ✨
 
 #### 6. **Code Quality**
+
 - ✅ Black formatting (100 char line length)
 - ✅ isort import sorting
 - ✅ Ruff linting (all checks passed)
@@ -78,19 +85,23 @@
 ## 🚧 Not Yet Implemented (Phase 2 - Integration)
 
 ### Tools to Build
+
 1. **Classifier Tool** (`src/tools/classifier.py`)
+
    - LLM-backed classification with Gemini
    - Fallback to deterministic rules (CFOP/NCM mapping)
    - Cost center and category assignment
    - Confidence scoring
 
 2. **Database Tool** (`src/database/operations.py`)
+
    - SQLite schema with SQLModel
    - Store normalized `InvoiceModel` + raw XML
    - Query interface for reports
    - Audit trail tracking
 
 3. **Archiver Tool** (`src/tools/archiver.py`)
+
    - Organize XML files by date/issuer/type
    - Metadata sidecar files
    - Deduplication by document key
@@ -102,13 +113,16 @@
    - Tax breakdown charts
 
 ### Agent & Integration
+
 5. **LangChain Agent Core** (`src/agent/fiscal_agent.py`)
+
    - Initialize Gemini LLM client
    - Register tools as LangChain functions
    - Implement chat loop with conversation memory
    - Error handling and fallback logic
 
 6. **UI Wiring** (`src/ui/app.py` updates)
+
    - Connect upload → parse → validate → classify → store pipeline
    - Display validation results in table
    - Wire chat to agent
@@ -125,6 +139,7 @@
 ## 🚀 How to Run (Current State)
 
 ### Setup
+
 ```bash
 # Clone and enter project
 cd /home/bmos/private/private_repos/i2a2/projeto_final
@@ -137,6 +152,7 @@ pip install -r requirements.txt
 ```
 
 ### Run Tests
+
 ```bash
 # All tests with verbose output
 pytest tests/ -v
@@ -146,6 +162,7 @@ pytest --cov=src --cov-report=html
 ```
 
 ### Run Code Quality Checks
+
 ```bash
 # Format code
 black src/ tests/
@@ -159,9 +176,11 @@ mypy src/
 ```
 
 ### Run Streamlit UI (Preview)
+
 ```bash
 streamlit run src/ui/app.py
 ```
+
 Opens browser at `http://localhost:8501` with placeholder UI.
 
 ---
@@ -169,12 +188,15 @@ Opens browser at `http://localhost:8501` with placeholder UI.
 ## 📝 Next Steps (Prioritized)
 
 ### Immediate (Week 1)
+
 1. **Database Schema & Operations**
+
    - Define SQLModel tables for invoices, items, validations, classifications
    - Implement CRUD operations
    - Add migration support with Alembic
 
 2. **Classifier Tool (Deterministic Fallback)**
+
    - Build rule-based classifier using CFOP/NCM mappings
    - Add unit tests with sample rules
    - Prepare for LLM integration later
@@ -185,12 +207,15 @@ Opens browser at `http://localhost:8501` with placeholder UI.
    - Write tests for edge cases (ZIP extraction, duplicates)
 
 ### Short-term (Week 2)
+
 4. **LLM Integration**
+
    - Set up Gemini client with API key from environment
    - Create LangChain tool wrappers for XML parser, validator, classifier
    - Build simple agent loop (single-turn Q&A)
 
 5. **UI Integration**
+
    - Wire parse → validate → classify → store pipeline
    - Display validation table with color-coded severity
    - Add error handling and user feedback
@@ -200,13 +225,16 @@ Opens browser at `http://localhost:8501` with placeholder UI.
    - Basic matplotlib charts (totals by date, tax breakdown)
 
 ### Medium-term (Week 3-4)
+
 7. **Advanced Features**
+
    - ZIP file extraction and batch processing
    - Streaming for large files
    - LLM chat with conversation memory
    - Advanced visualizations (Streamlit charts)
 
 8. **Testing & Quality**
+
    - Integration tests (end-to-end flows)
    - Mock LLM responses for deterministic tests
    - Achieve >80% code coverage
@@ -221,6 +249,7 @@ Opens browser at `http://localhost:8501` with placeholder UI.
 ## 🎯 Success Metrics
 
 ### Current Status
+
 - ✅ 21/21 unit tests passing
 - ✅ Zero linting errors (ruff)
 - ✅ Code formatted (black/isort)
@@ -229,8 +258,9 @@ Opens browser at `http://localhost:8501` with placeholder UI.
 - ✅ Modular architecture
 
 ### Target Metrics (End of Phase 2)
+
 - [ ] 50+ unit tests passing
-- [ ] >80% code coverage
+- [ ] > 80% code coverage
 - [ ] All tools integrated and tested
 - [ ] LLM agent functional with mock tests
 - [ ] CI/CD pipeline green
@@ -241,6 +271,7 @@ Opens browser at `http://localhost:8501` with placeholder UI.
 ## 🛠️ Technical Decisions
 
 ### Architecture
+
 - **Modular design**: Each tool is independent and testable
 - **Pydantic everywhere**: Type safety and validation
 - **Decimal for money**: Avoid floating-point errors
@@ -248,11 +279,13 @@ Opens browser at `http://localhost:8501` with placeholder UI.
 - **SQLite**: Simple, embedded, no server required
 
 ### Testing Strategy
+
 - **Unit tests first**: Tools tested in isolation
 - **Mock LLM calls**: Deterministic tests, no API costs
 - **Integration tests later**: End-to-end flows with sample data
 
 ### Security
+
 - **No hardcoded secrets**: API keys via `.env`
 - **PII redaction**: Default in logs (configurable)
 - **Input validation**: Pydantic models reject invalid data
@@ -284,6 +317,7 @@ Opens browser at `http://localhost:8501` with placeholder UI.
 ## 🎉 Summary
 
 **Phase 1 (Foundation) is complete!** The project has:
+
 - Robust XML parsing for NFe/NFCe with safe handling
 - Comprehensive validation framework with 10+ rules
 - Full Pydantic models for type safety

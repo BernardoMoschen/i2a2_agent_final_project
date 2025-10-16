@@ -1,6 +1,26 @@
 """Streamlit UI for Fiscal Document Agent."""
 
+import logging
+import sys
+from pathlib import Path
+
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 import streamlit as st
+
+from src.agent.agent_core import create_agent
+from src.utils.file_processing import (
+    FileProcessor,
+    format_invoice_summary,
+    format_items_table,
+    format_validation_issues,
+)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="Fiscal Document Agent",
@@ -8,6 +28,25 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+def init_agent(api_key: str) -> None:
+    """
+    Initialize the agent with the given API key.
+
+    Args:
+        api_key: Google Gemini API key
+    """
+    if "agent" not in st.session_state or st.session_state.get("api_key") != api_key:
+        try:
+            logger.info("Initializing agent...")
+            st.session_state.agent = create_agent(api_key=api_key, model_name="gemini-2.5-flash-lite")
+            st.session_state.api_key = api_key
+            logger.info("Agent initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize agent: {e}", exc_info=True)
+            st.error(f"❌ Erro ao inicializar agente: {e}")
+            st.session_state.agent = None
 
 
 def main() -> None:
@@ -31,6 +70,10 @@ def main() -> None:
             help="Enter your Google Gemini API key for LLM-powered classification",
         )
 
+        # Initialize agent when API key is provided
+        if api_key:
+            init_agent(api_key)
+
         # Upload directory
         st.subheader("📁 Storage Settings")
         archive_dir = st.text_input("Archive Directory", value="./archives")
@@ -40,10 +83,12 @@ def main() -> None:
 
         # System status
         st.subheader("🔌 System Status")
-        if api_key:
-            st.success("✅ API Key configured")
+        if api_key and st.session_state.get("agent"):
+            st.success("✅ Agent connected to Gemini")
+        elif api_key:
+            st.warning("⏳ Initializing agent...")
         else:
-            st.warning("⚠️ No API Key (fallback mode)")
+            st.warning("⚠️ No API Key (limited mode)")
 
         st.info(f"📦 Archive: {archive_dir}")
         st.info(f"💾 Database: {db_path}")
@@ -64,31 +109,78 @@ def main() -> None:
         if uploaded_files:
             st.success(f"✅ {len(uploaded_files)} file(s) uploaded")
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if st.button("🔍 Parse", type="primary", use_container_width=True):
-                    st.info("Parser integration coming soon...")
-            with col2:
-                if st.button("✔️ Validate", use_container_width=True):
-                    st.info("Validator integration coming soon...")
-            with col3:
-                if st.button("🏷️ Classify", use_container_width=True):
-                    st.info("Classifier integration coming soon...")
+            # Process button
+            if st.button("🔍 Process All Files", type="primary", use_container_width=True):
+                processor = FileProcessor()
 
-            # Display uploaded files
-            st.subheader("Uploaded Files")
-            for file in uploaded_files:
-                with st.expander(f"📄 {file.name}"):
-                    st.text(f"Size: {file.size / 1024:.2f} KB")
-                    st.text(f"Type: {file.type}")
+                # Initialize progress
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                all_results = []
+
+                # Process each file
+                for idx, uploaded_file in enumerate(uploaded_files):
+                    status_text.text(f"Processing {uploaded_file.name}...")
+
+                    # Read file content
+                    file_content = uploaded_file.read()
+
+                    # Process file
+                    results = processor.process_file(file_content, uploaded_file.name)
+                    all_results.extend(results)
+
+                    # Update progress
+                    progress_bar.progress((idx + 1) / len(uploaded_files))
+
+                status_text.text(f"✅ Processed {len(all_results)} document(s)")
+                progress_bar.empty()
+
+                # Store results in session state
+                st.session_state.processed_documents = all_results
+
+                # Display results
+                st.divider()
+                st.subheader("📋 Processing Results")
+
+                for filename, invoice, issues in all_results:
+                    with st.expander(f"📄 {filename} - {invoice.document_type} {invoice.document_number}", expanded=True):
+                        # Summary
+                        st.markdown(format_invoice_summary(invoice))
+
+                        # Validation
+                        st.markdown("#### ✅ Validação")
+                        st.markdown(format_validation_issues(issues))
+
+                        # Items table
+                        st.markdown("#### 🛒 Itens do Documento")
+                        st.markdown(format_items_table(invoice))
+
+            # Display previously processed documents
+            elif "processed_documents" in st.session_state and st.session_state.processed_documents:
+                st.divider()
+                st.subheader("📋 Previously Processed Documents")
+
+                for filename, invoice, issues in st.session_state.processed_documents:
+                    with st.expander(f"📄 {filename} - {invoice.document_type} {invoice.document_number}"):
+                        st.markdown(format_invoice_summary(invoice))
+                        st.markdown("#### ✅ Validação")
+                        st.markdown(format_validation_issues(issues))
+                        st.markdown("#### 🛒 Itens")
+                        st.markdown(format_items_table(invoice))
 
     with tab2:
         st.header("Chat with Your Documents")
         st.markdown("Ask questions about your fiscal documents using natural language.")
 
-        # Chat messages container
+        # Initialize chat messages
         if "messages" not in st.session_state:
             st.session_state.messages = []
+
+            # Add greeting if agent is available
+            if st.session_state.get("agent"):
+                greeting = st.session_state.agent.get_greeting()
+                st.session_state.messages.append({"role": "assistant", "content": greeting})
 
         # Display chat history
         for message in st.session_state.messages:
@@ -97,19 +189,30 @@ def main() -> None:
 
         # Chat input
         if prompt := st.chat_input("Ask about your fiscal documents..."):
+            # Check if agent is available
+            if not st.session_state.get("agent"):
+                st.warning(
+                    "⚠️ Por favor, configure sua chave API do Gemini na barra lateral "
+                    "para usar o chat."
+                )
+                return
+
+            # Add user message
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
-            # Placeholder response
+            # Get agent response
             with st.chat_message("assistant"):
-                response = (
-                    "🔧 Agent integration coming soon. I'll be able to answer "
-                    "questions about your documents once the LangChain agent "
-                    "is wired up!"
-                )
-                st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
+                with st.spinner("🤔 Pensando..."):
+                    try:
+                        response = st.session_state.agent.chat(prompt)
+                        st.markdown(response)
+                        st.session_state.messages.append({"role": "assistant", "content": response})
+                    except Exception as e:
+                        error_msg = f"❌ Erro ao processar mensagem: {str(e)}"
+                        st.error(error_msg)
+                        logger.error(f"Chat error: {e}", exc_info=True)
 
     with tab3:
         st.header("Validation Results")
