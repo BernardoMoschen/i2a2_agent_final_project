@@ -18,6 +18,7 @@ Previously, all processed documents were stored in `st.session_state.processed_d
 ### 1. Database-Backed Storage
 
 All documents are persisted to SQLite via `DatabaseManager.save_invoice()`:
+
 - Unique constraint on `document_key` prevents duplicates
 - Automatic saving during file processing
 - Relationships: Invoice → Items (1:N), Invoice → ValidationIssues (1:N)
@@ -32,6 +33,7 @@ invoices = db.search_invoices(limit=page_size, offset=offset, **filters)
 ```
 
 **Controls**:
+
 - First/Previous/Next/Last buttons
 - Direct page jump via number input
 - Configurable page size (10, 25, 50, 100 documents)
@@ -41,11 +43,13 @@ invoices = db.search_invoices(limit=page_size, offset=offset, **filters)
 ### 3. Advanced Filtering
 
 **Available Filters**:
+
 - **Document Type**: Dropdown (All, NFe, NFCe, CTe, MDFe)
 - **Issuer CNPJ**: Text input with substring matching
 - **Days Back**: Number input (1-365 days)
 
 **Database Query**:
+
 ```python
 db.search_invoices(
     invoice_type="NFe",           # Exact match
@@ -59,11 +63,13 @@ db.search_invoices(
 ### 4. Display Modes
 
 #### Table View (Compact)
+
 - Pandas DataFrame with key columns: Date, Type, Number, Issuer, CNPJ, Total, Items
 - Use `st.dataframe()` with `hide_index=True` and `use_container_width=True`
 - Optimized for quick scanning of many documents
 
 #### Detailed View (Expanders)
+
 - Full document details in expandable sections
 - Issuer/Recipient information
 - Item-level breakdown
@@ -73,12 +79,14 @@ db.search_invoices(
 ### 5. Statistics Dashboard
 
 **Real-time Metrics**:
+
 - Total Documents (filtered count)
 - Current Page / Total Pages
 - Showing (count on current page)
 - All-time Total (from database)
 
 **Implementation**:
+
 ```python
 stats = db.get_statistics()
 # Returns: {
@@ -97,16 +105,19 @@ stats = db.get_statistics()
 #### Updated Methods
 
 **`search_invoices()`**:
+
 - Added `offset` parameter for pagination
 - Added `invoice_type` alias for `document_type`
 - Changed CNPJ filter to `.contains()` for substring matching
 - Added `days_back` filter using timedelta
 
 **`get_validation_issues(invoice_id: int)`** (NEW):
+
 - Returns all validation issues for a specific invoice
 - Used in detailed view to show warnings/errors
 
 **`save_invoice()`**:
+
 - Fixed DetachedInstanceError by eagerly loading relationships
 - Uses `session.refresh(invoice_db, ["items", "issues"])` before returning
 - Ensures relationships accessible after session closes
@@ -114,6 +125,7 @@ stats = db.get_statistics()
 ### UI Layer (`src/ui/app.py`)
 
 #### Tab Structure (Updated)
+
 ```python
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📤 Upload",      # Limited to 10 most recent
@@ -127,6 +139,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 #### Upload Tab Optimization
 
 **Before**:
+
 ```python
 # Displayed ALL documents from session_state
 for filename, invoice, issues in st.session_state.processed_documents:
@@ -135,6 +148,7 @@ for filename, invoice, issues in st.session_state.processed_documents:
 ```
 
 **After**:
+
 ```python
 # Show only last 10 from current session
 recent_docs = st.session_state.processed_documents[-10:]
@@ -148,6 +162,7 @@ st.info(
 #### History Tab Components
 
 **Filters Row**:
+
 ```python
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -159,6 +174,7 @@ with col3:
 ```
 
 **Pagination Row**:
+
 ```python
 col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
 with col1:
@@ -174,6 +190,7 @@ with col5:
 ```
 
 **Action Buttons**:
+
 ```python
 col1, col2 = st.columns(2)
 with col1:
@@ -192,8 +209,9 @@ with col2:
 ### Database Queries
 
 **Pagination Query**:
+
 ```sql
-SELECT * FROM invoicedb 
+SELECT * FROM invoicedb
 WHERE document_type = 'NFe'
   AND issuer_cnpj LIKE '%12345%'
   AND issue_date >= '2025-01-01'
@@ -202,17 +220,20 @@ LIMIT 25 OFFSET 0;
 ```
 
 **Optimizations**:
+
 - Index on `document_key` (UNIQUE constraint)
 - Index on `issue_date` (for date range queries)
 - Limit always applied to prevent unbounded result sets
 
 ### UI Rendering
 
-**Table View**: 
+**Table View**:
+
 - Pandas DataFrame optimized for hundreds of rows
 - Lazy rendering (only visible rows computed)
 
-**Expanders**: 
+**Expanders**:
+
 - Limited to one page (25-50 documents max)
 - User must explicitly click to expand
 
@@ -250,13 +271,16 @@ def test_get_validation_issues(temp_db):
 ## Migration Notes
 
 ### Breaking Changes
+
 None - This is a new tab, existing functionality unchanged
 
 ### New Dependencies
+
 - `pandas` - Already in requirements.txt for DataFrames
 - `json` - Standard library
 
 ### Database Schema Changes
+
 None - Uses existing tables with backward-compatible method updates
 
 ## Usage Examples
@@ -292,8 +316,9 @@ None - Uses existing tables with backward-compatible method updates
 ## Future Enhancements
 
 ### Planned Features
+
 1. **Bulk Operations**: Select multiple documents for batch delete/export
-2. **Advanced Filters**: 
+2. **Advanced Filters**:
    - Recipient CNPJ
    - Value range (min/max)
    - Has validation errors (yes/no)
@@ -302,6 +327,7 @@ None - Uses existing tables with backward-compatible method updates
 5. **Charts**: Visualize document distribution by type, issuer, time
 
 ### Performance Improvements
+
 1. **Lazy Loading**: Only load items/issues when expander clicked
 2. **Caching**: Cache filter results for 60 seconds
 3. **Indexes**: Add composite indexes for common filter combinations
@@ -313,7 +339,8 @@ None - Uses existing tables with backward-compatible method updates
 
 **Cause**: SQLAlchemy session closed before accessing lazy-loaded relationships
 
-**Solution**: 
+**Solution**:
+
 ```python
 # In save_invoice() and other methods returning InvoiceDB
 session.refresh(invoice_db, ["items", "issues"])
@@ -325,6 +352,7 @@ return invoice_db
 **Cause**: `st.session_state.history_page` not initialized
 
 **Solution**:
+
 ```python
 if "history_page" not in st.session_state:
     st.session_state.history_page = 1
@@ -335,6 +363,7 @@ if "history_page" not in st.session_state:
 **Cause**: Missing `st.rerun()` after state change
 
 **Solution**: Streamlit auto-reruns on widget changes, but manual rerun needed after:
+
 - Delete operation
 - Page change
 - Filter clear
@@ -351,6 +380,7 @@ if "history_page" not in st.session_state:
 The Document History tab provides a production-ready solution for managing large datasets of fiscal documents. The combination of database-backed storage, efficient pagination, and advanced filtering ensures the application remains responsive even with thousands of documents.
 
 **Key Metrics**:
+
 - **Performance**: <500ms query time for 10,000 documents with filters
 - **Scalability**: Tested up to 100,000 documents without degradation
 - **UX**: Average 2-3 clicks to find any document
