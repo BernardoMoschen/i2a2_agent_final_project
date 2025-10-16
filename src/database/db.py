@@ -1,11 +1,12 @@
 """Database models and operations using SQLModel and SQLite."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import create_engine
+from sqlalchemy.orm import selectinload
 from sqlmodel import Field, Relationship, Session, SQLModel, select
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,8 @@ class DatabaseManager:
             
             if existing:
                 logger.warning(f"Invoice {invoice_model.document_key} already exists")
+                # Eagerly load relationships before returning
+                session.refresh(existing, ["items", "issues"])
                 return existing
 
             # Create invoice
@@ -207,55 +210,116 @@ class DatabaseManager:
             session.commit()
             logger.info(f"Saved invoice {invoice_db.document_key} with {len(invoice_model.items)} items")
             
+            # Eagerly load relationships before session closes
+            session.refresh(invoice_db, ["items", "issues"])
+            
             return invoice_db
 
     def get_invoice_by_key(self, document_key: str) -> Optional[InvoiceDB]:
-        """Get invoice by document key."""
+        """Get invoice by document key with relationships loaded."""
+        from sqlalchemy.orm import selectinload
+        
         with Session(self.engine) as session:
-            statement = select(InvoiceDB).where(InvoiceDB.document_key == document_key)
-            return session.exec(statement).first()
+            statement = select(InvoiceDB).options(
+                selectinload(InvoiceDB.items),
+                selectinload(InvoiceDB.issues)
+            ).where(InvoiceDB.document_key == document_key)
+            
+            invoice = session.exec(statement).first()
+            if invoice:
+                # Ensure relationships are loaded
+                _ = invoice.items
+                _ = invoice.issues
+            return invoice
 
     def get_all_invoices(self, limit: int = 100, offset: int = 0) -> List[InvoiceDB]:
-        """Get all invoices with pagination."""
+        """Get all invoices with pagination and relationships loaded."""
+        from sqlalchemy.orm import selectinload
+        
         with Session(self.engine) as session:
-            statement = select(InvoiceDB).order_by(InvoiceDB.issue_date.desc()).limit(limit).offset(offset)
-            return list(session.exec(statement).all())
+            statement = select(InvoiceDB).options(
+                selectinload(InvoiceDB.items),
+                selectinload(InvoiceDB.issues)
+            ).order_by(InvoiceDB.issue_date.desc()).limit(limit).offset(offset)
+            
+            invoices = list(session.exec(statement).all())
+            # Ensure relationships are loaded
+            for inv in invoices:
+                _ = inv.items
+                _ = inv.issues
+            return invoices
 
     def search_invoices(
         self,
         document_type: Optional[str] = None,
+        invoice_type: Optional[str] = None,  # Alias for document_type
         issuer_cnpj: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        days_back: Optional[int] = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> List[InvoiceDB]:
         """
         Search invoices with filters.
 
         Args:
             document_type: Filter by document type (NFe, NFCe, etc.)
-            issuer_cnpj: Filter by issuer CNPJ
+            invoice_type: Alias for document_type
+            issuer_cnpj: Filter by issuer CNPJ (contains search)
             start_date: Filter by issue date >= start_date
             end_date: Filter by issue date <= end_date
+            days_back: Filter by documents from last N days
             limit: Maximum results
+            offset: Skip first N results (for pagination)
 
         Returns:
-            List of matching invoices
+            List of matching invoices with eagerly loaded relationships
         """
+        from sqlalchemy.orm import selectinload
+        
         with Session(self.engine) as session:
-            statement = select(InvoiceDB)
+            statement = select(InvoiceDB).options(
+                selectinload(InvoiceDB.items),
+                selectinload(InvoiceDB.issues)
+            )
             
-            if document_type:
-                statement = statement.where(InvoiceDB.document_type == document_type)
+            # Handle both document_type and invoice_type (alias)
+            doc_type = document_type or invoice_type
+            if doc_type:
+                statement = statement.where(InvoiceDB.document_type == doc_type)
+            
+            # CNPJ contains search
             if issuer_cnpj:
-                statement = statement.where(InvoiceDB.issuer_cnpj == issuer_cnpj)
+                statement = statement.where(InvoiceDB.issuer_cnpj.contains(issuer_cnpj))
+            
+            # Date filters
+            if days_back:
+                cutoff_date = datetime.now(UTC) - timedelta(days=days_back)
+                statement = statement.where(InvoiceDB.issue_date >= cutoff_date)
             if start_date:
                 statement = statement.where(InvoiceDB.issue_date >= start_date)
             if end_date:
                 statement = statement.where(InvoiceDB.issue_date <= end_date)
             
-            statement = statement.order_by(InvoiceDB.issue_date.desc()).limit(limit)
-            return list(session.exec(statement).all())
+            # Order by date descending and apply pagination
+            statement = (
+                statement
+                .order_by(InvoiceDB.issue_date.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            
+            # Execute query and get all results
+            invoices = list(session.exec(statement).all())
+            
+            # Ensure relationships are loaded before session closes
+            for inv in invoices:
+                # Access relationships to ensure they're loaded
+                _ = inv.items
+                _ = inv.issues
+            
+            return invoices
 
     def get_statistics(self) -> dict:
         """Get database statistics."""
@@ -294,3 +358,11 @@ class DatabaseManager:
                 return True
             
             return False
+
+    def get_validation_issues(self, invoice_id: int) -> list[ValidationIssueDB]:
+        """Get validation issues for a specific invoice."""
+        with Session(self.engine) as session:
+            statement = select(ValidationIssueDB).where(
+                ValidationIssueDB.invoice_id == invoice_id
+            )
+            return list(session.exec(statement).all())
