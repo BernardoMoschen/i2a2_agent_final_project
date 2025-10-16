@@ -3,8 +3,9 @@
 import logging
 import zipfile
 from io import BytesIO
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
+from src.database.db import DatabaseManager
 from src.models import InvoiceModel
 from src.tools.fiscal_validator import FiscalValidatorTool
 from src.tools.xml_parser import XMLParserTool
@@ -15,10 +16,21 @@ logger = logging.getLogger(__name__)
 class FileProcessor:
     """Process uploaded XML and ZIP files."""
 
-    def __init__(self):
-        """Initialize processor with parser and validator."""
+    def __init__(self, database_url: str = "sqlite:///fiscal_documents.db", save_to_db: bool = True):
+        """
+        Initialize processor with parser and validator.
+        
+        Args:
+            database_url: SQLite database URL
+            save_to_db: Whether to automatically save to database (default: True)
+        """
         self.parser = XMLParserTool()
         self.validator = FiscalValidatorTool()
+        self.save_to_db = save_to_db
+        
+        if save_to_db:
+            self.db = DatabaseManager(database_url)
+            logger.info("FileProcessor initialized with database integration")
 
     def process_file(self, file_content: bytes, filename: str) -> List[Tuple[str, InvoiceModel, List]]:
         """
@@ -93,6 +105,15 @@ class FileProcessor:
             issues = self.validator.validate(invoice)
 
             logger.info(f"Processed {filename}: {invoice.document_type} {invoice.document_key}")
+
+            # Save to database if enabled
+            if self.save_to_db:
+                try:
+                    self.db.save_invoice(invoice, issues)
+                    logger.info(f"Saved {invoice.document_key} to database")
+                except Exception as e:
+                    logger.error(f"Failed to save to database: {e}")
+                    # Continue even if DB save fails
 
             return (filename, invoice, issues)
 
