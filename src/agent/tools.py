@@ -1,5 +1,6 @@
 """LangChain tool wrappers for fiscal document processing."""
 
+import logging
 from datetime import datetime
 from typing import Any, Optional
 
@@ -10,6 +11,8 @@ from src.database.db import DatabaseManager
 from src.models import InvoiceModel, ValidationIssue
 from src.tools.fiscal_validator import FiscalValidatorTool
 from src.tools.xml_parser import XMLParserTool
+
+logger = logging.getLogger(__name__)
 
 
 class ParseXMLInput(BaseModel):
@@ -243,26 +246,31 @@ class DatabaseSearchTool(BaseTool):
     description: str = """
     Search for fiscal documents stored in the database with flexible filters.
     
-    ⚠️ IMPORTANT FOR COUNTING/LISTING DOCUMENTS:
-    - ALWAYS use days_back=9999 when user asks "quantas", "how many", "mostre todas", "list all"
-    - This ensures ALL documents are searched, not just recent ones
-    - Documents may be very old (2023, 2024, etc.)
+    🚨 CRITICAL: When user asks about counting or listing documents, you MUST use days_back=9999!
     
-    Use this when user asks:
-    - "Quantas notas foram processadas?" → days_back=9999
-    - "Quantas notas de compra temos?" → operation_type='purchase', days_back=9999
-    - "Quantas notas de venda existem?" → operation_type='sale', days_back=9999
-    - "How many purchase items?" → operation_type='purchase', days_back=9999
-    - "Mostre documentos do emitente X" → issuer_cnpj=X, days_back=9999
-    - "Buscar NFes" → document_type='NFe', days_back=9999
-    - "Transferências" → operation_type='transfer', days_back=9999
+    ⚠️ MANDATORY RULES (YOU MUST FOLLOW):
+    1. ANY question with "quantas", "quantos", "how many", "count" → days_back=9999
+    2. ANY question about a specific YEAR (2024, 2023, etc.) → days_back=9999
+    3. ANY question with "todas", "todos", "all", "list" → days_back=9999
+    4. ANY question about totals or statistics → days_back=9999
+    5. Documents in database may be from 2023, 2024, or older → days_back=9999
     
-    CRITICAL RULES:
-    - For "notas de compra" or "purchase" → operation_type='purchase', days_back=9999
-    - For "notas de venda" or "sale" → operation_type='sale', days_back=9999
-    - For "transferências" or "transfer" → operation_type='transfer', days_back=9999
-    - For "devoluções" or "return" → operation_type='return', days_back=9999
-    - When user asks "quantas" or "how many" → ALWAYS use days_back=9999
+    ✅ CORRECT USAGE EXAMPLES:
+    - "Quantas notas de compra?" → operation_type='purchase', days_back=9999
+    - "How many purchases in 2024?" → operation_type='purchase', days_back=9999
+    - "Quantos arquivos de purchase no ano de 2024?" → operation_type='purchase', days_back=9999
+    - "Mostre todas as vendas" → operation_type='sale', days_back=9999
+    - "Total de documentos" → days_back=9999
+    
+    ❌ WRONG - DO NOT DO THIS:
+    - Using days_back=30 or days_back=365 for counting questions
+    - Using default value when user asks "quantas" or "how many"
+    
+    OPERATION TYPE MAPPING:
+    - "compra", "purchase", "entrada" → operation_type='purchase'
+    - "venda", "sale", "saída" → operation_type='sale'
+    - "transferência", "transfer" → operation_type='transfer'
+    - "devolução", "return" → operation_type='return'
     
     Returns: Count and detailed list of invoices with operation type, issuer, date, total value
     """
@@ -279,6 +287,12 @@ class DatabaseSearchTool(BaseTool):
         try:
             # Create database connection (no state stored)
             db = DatabaseManager("sqlite:///fiscal_documents.db")
+            
+            # 🚨 CRITICAL FIX: Force days_back=9999 when filtering by operation_type
+            # This ensures we search ALL documents when user asks for counts by type or year
+            if operation_type is not None:
+                days_back = 9999
+                logger.info(f"🔧 Auto-forcing days_back=9999 because operation_type filter is active")
             
             # Search database with all filters
             invoices = db.search_invoices(
@@ -384,7 +398,6 @@ Para ver TODOS os documentos, use days_back=9999.
     ) -> str:
         """Async version."""
         return self._run(document_type, operation_type, issuer_cnpj, days_back)
-        return self._run(document_type, issuer_cnpj, days_back)
 
 
 class GetStatisticsInput(BaseModel):
