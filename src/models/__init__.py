@@ -139,12 +139,12 @@ class InvoiceModel(BaseModel):
 class ClassificationResult(BaseModel):
     """Result of document classification."""
 
+    operation_type: str = Field(..., description="Operation type (purchase/sale/transfer/return)")
     cost_center: str = Field(..., description="Assigned cost center")
-    category: str = Field(..., description="Assigned category")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score [0, 1]")
     reasoning: str | None = Field(None, description="Explanation of classification")
-    fallback_used: bool = Field(
-        default=False, description="Whether deterministic fallback was used"
+    used_llm_fallback: bool = Field(
+        default=False, description="Whether LLM fallback was used"
     )
 
     model_config = ConfigDict(use_enum_values=True)

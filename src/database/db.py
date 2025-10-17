@@ -44,6 +44,13 @@ class InvoiceDB(SQLModel, table=True):
     tax_cofins: Decimal = Field(default=Decimal("0"))
     tax_issqn: Decimal = Field(default=Decimal("0"))
     
+    # Classification fields
+    operation_type: Optional[str] = Field(default=None, index=True)
+    cost_center: Optional[str] = Field(default=None, index=True)
+    classification_confidence: Optional[float] = Field(default=None)
+    classification_reasoning: Optional[str] = Field(default=None)
+    used_llm_fallback: bool = Field(default=False)
+    
     # Metadata
     raw_xml: Optional[str] = Field(default=None)
     parsed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -123,13 +130,15 @@ class DatabaseManager:
         """Create all tables if they don't exist."""
         SQLModel.metadata.create_all(self.engine)
 
-    def save_invoice(self, invoice_model, validation_issues: List) -> InvoiceDB:
+    def save_invoice(self, invoice_model, validation_issues: List, classification: Optional[dict] = None) -> InvoiceDB:
         """
         Save invoice and related data to database.
 
         Args:
             invoice_model: InvoiceModel from Pydantic
             validation_issues: List of ValidationIssue objects
+            classification: Optional dict with classification results
+                {operation_type, cost_center, confidence, reasoning, used_llm_fallback}
 
         Returns:
             Saved InvoiceDB instance
@@ -169,6 +178,14 @@ class DatabaseManager:
                 raw_xml=invoice_model.raw_xml,
                 parsed_at=invoice_model.parsed_at,
             )
+            
+            # Add classification if provided
+            if classification:
+                invoice_db.operation_type = classification.get("operation_type")
+                invoice_db.cost_center = classification.get("cost_center")
+                invoice_db.classification_confidence = classification.get("confidence")
+                invoice_db.classification_reasoning = classification.get("reasoning")
+                invoice_db.used_llm_fallback = classification.get("used_llm_fallback", False)
             
             session.add(invoice_db)
             session.commit()
@@ -253,6 +270,7 @@ class DatabaseManager:
         self,
         document_type: Optional[str] = None,
         invoice_type: Optional[str] = None,  # Alias for document_type
+        operation_type: Optional[str] = None,  # Filter by classification
         issuer_cnpj: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
@@ -266,6 +284,7 @@ class DatabaseManager:
         Args:
             document_type: Filter by document type (NFe, NFCe, etc.)
             invoice_type: Alias for document_type
+            operation_type: Filter by operation type (purchase, sale, transfer, return)
             issuer_cnpj: Filter by issuer CNPJ (contains search)
             start_date: Filter by issue date >= start_date
             end_date: Filter by issue date <= end_date
@@ -288,6 +307,10 @@ class DatabaseManager:
             doc_type = document_type or invoice_type
             if doc_type:
                 statement = statement.where(InvoiceDB.document_type == doc_type)
+            
+            # Operation type filter
+            if operation_type:
+                statement = statement.where(InvoiceDB.operation_type == operation_type)
             
             # CNPJ contains search
             if issuer_cnpj:

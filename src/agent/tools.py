@@ -231,8 +231,9 @@ class SearchInvoicesInput(BaseModel):
     """Input schema for searching invoices in database."""
 
     document_type: Optional[str] = Field(None, description="Filter by document type: NFe, NFCe, CTe, or MDFe")
+    operation_type: Optional[str] = Field(None, description="Filter by operation type: purchase (compra), sale (venda), transfer (transferência), or return (devolução)")
     issuer_cnpj: Optional[str] = Field(None, description="Filter by issuer CNPJ (14 digits)")
-    days_back: Optional[int] = Field(7, description="Search last N days (default 7)")
+    days_back: Optional[int] = Field(3650, description="Search last N days. Default is 3650 (10 years) to ensure all documents are found. Use 9999 to search ALL documents ever processed.")
 
 
 class DatabaseSearchTool(BaseTool):
@@ -240,80 +241,133 @@ class DatabaseSearchTool(BaseTool):
 
     name: str = "search_invoices_database"
     description: str = """
-    Search for fiscal documents stored in the database.
+    Search for fiscal documents stored in the database with flexible filters.
+    
+    ⚠️ IMPORTANT FOR COUNTING/LISTING DOCUMENTS:
+    - ALWAYS use days_back=9999 when user asks "quantas", "how many", "mostre todas", "list all"
+    - This ensures ALL documents are searched, not just recent ones
+    - Documents may be very old (2023, 2024, etc.)
     
     Use this when user asks:
-    - "Quais notas foram processadas?"
-    - "Mostre documentos do emitente X"
-    - "Buscar NFes da última semana"
-    - "Quantos documentos temos no banco?"
+    - "Quantas notas foram processadas?" → days_back=9999
+    - "Quantas notas de compra temos?" → operation_type='purchase', days_back=9999
+    - "Quantas notas de venda existem?" → operation_type='sale', days_back=9999
+    - "How many purchase items?" → operation_type='purchase', days_back=9999
+    - "Mostre documentos do emitente X" → issuer_cnpj=X, days_back=9999
+    - "Buscar NFes" → document_type='NFe', days_back=9999
+    - "Transferências" → operation_type='transfer', days_back=9999
     
-    Returns: List of invoices with key details (document key, issuer, date, total)
+    CRITICAL RULES:
+    - For "notas de compra" or "purchase" → operation_type='purchase', days_back=9999
+    - For "notas de venda" or "sale" → operation_type='sale', days_back=9999
+    - For "transferências" or "transfer" → operation_type='transfer', days_back=9999
+    - For "devoluções" or "return" → operation_type='return', days_back=9999
+    - When user asks "quantas" or "how many" → ALWAYS use days_back=9999
+    
+    Returns: Count and detailed list of invoices with operation type, issuer, date, total value
     """
     args_schema: type[BaseModel] = SearchInvoicesInput
 
     def _run(
         self,
         document_type: Optional[str] = None,
+        operation_type: Optional[str] = None,
         issuer_cnpj: Optional[str] = None,
-        days_back: int = 7,
+        days_back: int = 3650,
     ) -> str:
         """Search invoices in database."""
         try:
             # Create database connection (no state stored)
             db = DatabaseManager("sqlite:///fiscal_documents.db")
             
-            # Calculate date range
-            from datetime import timedelta, UTC
-            end_date = datetime.now(UTC)
-            start_date = end_date - timedelta(days=days_back)
-            
-            # Search database
+            # Search database with all filters
             invoices = db.search_invoices(
                 document_type=document_type,
+                operation_type=operation_type,
                 issuer_cnpj=issuer_cnpj,
-                start_date=start_date,
-                end_date=end_date,
-                limit=50,
+                days_back=days_back,
+                limit=100,
             )
             
             if not invoices:
+                filter_desc = []
+                if document_type:
+                    filter_desc.append(f"Tipo: {document_type}")
+                if operation_type:
+                    op_label = {"purchase": "Compra", "sale": "Venda", "transfer": "Transferência", "return": "Devolução"}.get(operation_type, operation_type)
+                    filter_desc.append(f"Operação: {op_label}")
+                if issuer_cnpj:
+                    filter_desc.append(f"Emitente: {issuer_cnpj}")
+                filter_desc.append(f"Período: Últimos {days_back} dias")
+                
                 return f"""
 🔍 Nenhum documento encontrado com os filtros:
-- Tipo: {document_type or 'Todos'}
-- Emitente: {issuer_cnpj or 'Todos'}
-- Período: Últimos {days_back} dias
+{chr(10).join(f'- {f}' for f in filter_desc)}
 
-💡 Dica: Tente ampliar o período ou remover filtros.
+💡 Dica: Tente ampliar o período (days_back) ou remover filtros.
+Para ver TODOS os documentos, use days_back=9999.
 """
+            
+            # Count by operation type
+            op_counts = {}
+            for inv in invoices:
+                op = inv.operation_type or "not_classified"
+                op_counts[op] = op_counts.get(op, 0) + 1
             
             # Format results
             result = f"""
-📊 Encontrados {len(invoices)} documento(s):
+📊 **Encontrados {len(invoices)} documento(s):**
 
 """
             
-            for inv in invoices[:20]:  # Limit display to 20
+            # Show operation type breakdown if filtered or multiple types exist
+            if len(op_counts) > 1 or operation_type:
+                result += "**Por Tipo de Operação:**\n"
+                op_labels = {
+                    "purchase": "📥 Compras",
+                    "sale": "📤 Vendas", 
+                    "transfer": "🔄 Transferências",
+                    "return": "↩️ Devoluções",
+                    "not_classified": "❓ Não classificado"
+                }
+                for op, count in sorted(op_counts.items()):
+                    label = op_labels.get(op, op)
+                    result += f"- {label}: {count}\n"
+                result += "\n"
+            
+            # Show first 15 documents
+            for inv in invoices[:15]:
+                op_emoji = {
+                    "purchase": "📥",
+                    "sale": "📤",
+                    "transfer": "🔄",
+                    "return": "↩️"
+                }.get(inv.operation_type, "📄")
+                
+                op_label = {
+                    "purchase": "Compra",
+                    "sale": "Venda",
+                    "transfer": "Transfer",
+                    "return": "Devolução"
+                }.get(inv.operation_type, "N/A") if inv.operation_type else "N/A"
+                
                 result += f"""
-📄 **{inv.document_type}** - {inv.document_number}/{inv.series}
-   🔑 Chave: {inv.document_key}
-   🏢 Emitente: {inv.issuer_name} ({inv.issuer_cnpj})
+{op_emoji} **{inv.document_type}** - {inv.document_number}/{inv.series} | {op_label}
+   🏢 Emitente: {inv.issuer_name[:40]}
    📅 Data: {inv.issue_date.strftime('%d/%m/%Y')}
    💰 Valor: R$ {inv.total_invoice:,.2f}
-   📦 Itens: {len(inv.items)}
-   {'⚠️' if inv.issues else '✅'} Validação: {len([i for i in inv.issues if i.severity == 'error'])} erro(s)
 
 """
             
-            if len(invoices) > 20:
-                result += f"\n_... e mais {len(invoices) - 20} documento(s)_\n"
+            if len(invoices) > 15:
+                result += f"\n_... e mais {len(invoices) - 15} documento(s)_\n\n"
             
             # Add statistics
             total_value = sum(inv.total_invoice for inv in invoices)
             result += f"""
-**Resumo:**
-- Total de documentos: {len(invoices)}
-- Valor total: R$ {total_value:,.2f}
+**Resumo Final:**
+- 📄 Total de documentos: {len(invoices)}
+- 💰 Valor total: R$ {total_value:,.2f}
 """
             
             return result
@@ -324,10 +378,12 @@ class DatabaseSearchTool(BaseTool):
     async def _arun(
         self,
         document_type: Optional[str] = None,
+        operation_type: Optional[str] = None,
         issuer_cnpj: Optional[str] = None,
-        days_back: int = 7,
+        days_back: int = 3650,
     ) -> str:
         """Async version."""
+        return self._run(document_type, operation_type, issuer_cnpj, days_back)
         return self._run(document_type, issuer_cnpj, days_back)
 
 
