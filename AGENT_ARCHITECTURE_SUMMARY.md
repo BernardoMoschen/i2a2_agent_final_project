@@ -121,17 +121,20 @@
 ## 🔑 Componentes Principais
 
 ### 1️⃣ **Agent Core** (`src/agent/agent_core.py`)
+
 - Orquestrador principal
 - Gerencia memória (histórico)
 - Conecta LLM com ferramentas
 
 ### 2️⃣ **System Prompt** (`src/agent/prompts.py`)
+
 - **Instruções** para o LLM
 - **Mapeamentos** de termos leigos → técnicos
 - **Regras críticas** de uso das ferramentas
 - **Exemplos** de interpretação correta
 
 ### 3️⃣ **Ferramentas** (`src/agent/tools.py`)
+
 - `DatabaseSearchTool` ⭐ PRINCIPAL
 - `DatabaseStatsTool`
 - `ParseXMLTool`
@@ -139,6 +142,7 @@
 - `FiscalKnowledgeTool`
 
 ### 4️⃣ **Database Manager** (`src/database/db.py`)
+
 - Acessa SQLite
 - Filtra documentos
 - Retorna resultados
@@ -148,11 +152,13 @@
 ### ✅ System Prompt Melhorado
 
 **ANTES:**
+
 ```python
 "Use search_invoices_database to search documents"
 ```
 
 **DEPOIS:**
+
 ```python
 """
 🎯 MISSÃO: Interpretar perguntas em LINGUAGEM SIMPLES
@@ -183,13 +189,14 @@ def _run(self, operation_type=None, days_back=3650):
     if operation_type is not None:
         days_back = 9999  # ← AUTOMÁTICO!
         logger.info("🔧 Auto-forcing days_back=9999")
-    
+
     # Continue com a busca...
 ```
 
 ### ✅ Documentação para Usuários
 
 Criados 3 guias:
+
 1. **AGENT_COMMUNICATION.md** - Como funciona tecnicamente
 2. **USER_QUESTIONS_GUIDE.md** - Perguntas comuns para usuários
 3. **FISCAL_VALIDATIONS.md** - Validações implementadas
@@ -198,17 +205,17 @@ Criados 3 guias:
 
 ### Termos Leigos → Técnicos
 
-| Usuário Diz | Sistema Entende |
-|-------------|-----------------|
+| Usuário Diz                    | Sistema Entende             |
+| ------------------------------ | --------------------------- |
 | "compra", "comprei", "entrada" | `operation_type='purchase'` |
-| "venda", "vendi", "saída" | `operation_type='sale'` |
-| "quantas", "total", "tudo" | `days_back=9999` |
-| "2024", "este ano" | `days_back=9999` |
-| "nota fiscal", "nf" | `document_type='NFe'` |
-| "cupom" | `document_type='NFCe'` |
-| "semana" | `days_back=14` |
-| "mês passado" | `days_back=60` |
-| "hoje" | `days_back=1` |
+| "venda", "vendi", "saída"      | `operation_type='sale'`     |
+| "quantas", "total", "tudo"     | `days_back=9999`            |
+| "2024", "este ano"             | `days_back=9999`            |
+| "nota fiscal", "nf"            | `document_type='NFe'`       |
+| "cupom"                        | `document_type='NFCe'`      |
+| "semana"                       | `days_back=14`              |
+| "mês passado"                  | `days_back=60`              |
+| "hoje"                         | `days_back=1`               |
 
 ## 🚀 Exemplos de Uso
 
@@ -220,10 +227,10 @@ Criados 3 guias:
 🤖 Pensa:
    - "quantas" = contar = days_back=9999
    - "compra" = operation_type='purchase'
-   
+
 🤖 Executa:
    search_invoices_database(operation_type='purchase', days_back=9999)
-   
+
 🤖 Responde:
    "📊 Temos 2 notas de compra! 💰 R$ 1,522.50"
 ```
@@ -236,10 +243,10 @@ Criados 3 guias:
 🤖 Pensa:
    - "2024" = ano específico = days_back=9999
    - "compras" = operation_type='purchase'
-   
+
 🤖 Executa:
    search_invoices_database(operation_type='purchase', days_back=9999)
-   
+
 🤖 Responde:
    "📊 Encontrei 2 compras em 2024..."
 ```
@@ -255,6 +262,7 @@ Criados 3 guias:
 ### 2. **Não Confie Apenas no LLM**
 
 Mesmo com instruções perfeitas, o LLM pode:
+
 - Interpretar errado
 - Escolher parâmetros inadequados
 - Ignorar regras
@@ -264,6 +272,7 @@ Mesmo com instruções perfeitas, o LLM pode:
 ### 3. **Simplicidade para o Usuário**
 
 Usuário não deve saber:
+
 - Nomes de ferramentas
 - Parâmetros técnicos
 - Estrutura de dados
@@ -281,12 +290,14 @@ Basta fazer perguntas naturais! 🗣️
 ## 🎯 Resultado Final
 
 **ANTES:**
+
 ```
 👤 "Quantas compras temos?"
 🤖 "❌ Não encontrei nenhuma compra."
 ```
 
 **DEPOIS:**
+
 ```
 👤 "Quantas compras temos?"
 🤖 "📊 Temos 2 notas de compra!
@@ -299,6 +310,7 @@ Basta fazer perguntas naturais! 🗣️
 Sistema está **pronto para produção**! 🚀
 
 Usuários podem:
+
 - ✅ Fazer perguntas em **linguagem natural**
 - ✅ Obter **respostas precisas**
 - ✅ Não precisar conhecer **termos técnicos**

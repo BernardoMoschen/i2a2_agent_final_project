@@ -11,6 +11,7 @@ Este guia mostra **exemplos de perguntas em linguagem simples** que você pode f
 ### 🔢 Contando Documentos
 
 ✅ **Perguntas que funcionam:**
+
 - "Quantas notas de compra temos?"
 - "Quantos documentos temos no sistema?"
 - "Quantas vendas fizemos?"
@@ -21,12 +22,14 @@ Este guia mostra **exemplos de perguntas em linguagem simples** que você pode f
 - "Quantas devoluções?"
 
 **O que o agente faz:**
+
 - Busca no banco de dados
 - Conta os documentos
 - Mostra valor total
 - Lista os documentos encontrados
 
 **Exemplo de resposta:**
+
 ```
 📊 Temos 2 notas de compra no sistema!
 
@@ -49,6 +52,7 @@ Este guia mostra **exemplos de perguntas em linguagem simples** que você pode f
 ### 📅 Filtrando por Período
 
 ✅ **Perguntas que funcionam:**
+
 - "Vendas desta semana"
 - "Compras do mês passado"
 - "Notas de hoje"
@@ -57,6 +61,7 @@ Este guia mostra **exemplos de perguntas em linguagem simples** que você pode f
 - "Compras deste ano"
 
 **Mapeamento automático:**
+
 - "desta semana" → últimos 14 dias
 - "deste mês" / "mês passado" → últimos 60 dias
 - "hoje" → último dia
@@ -68,6 +73,7 @@ Este guia mostra **exemplos de perguntas em linguagem simples** que você pode f
 ### 🏢 Filtrando por Fornecedor/Cliente
 
 ✅ **Perguntas que funcionam:**
+
 - "Notas do fornecedor CNPJ 12.345.678/0001-90"
 - "Compras da empresa X"
 - "Mostrar documentos do emitente [CNPJ]"
@@ -80,11 +86,13 @@ Este guia mostra **exemplos de perguntas em linguagem simples** que você pode f
 ### 📦 Filtrando por Tipo de Documento
 
 ✅ **Perguntas que funcionam:**
+
 - "Mostrar todas as notas fiscais" (NFe)
 - "Quantos cupons fiscais temos?" (NFCe)
 - "Listar conhecimentos de transporte" (CTe)
 
 **Tipos reconhecidos:**
+
 - "nota fiscal", "nf", "nota" → NFe
 - "cupom", "cupom fiscal" → NFCe
 - "conhecimento de transporte", "cte" → CTe
@@ -97,10 +105,12 @@ Este guia mostra **exemplos de perguntas em linguagem simples** que você pode f
 ### ✅ Enviando XML para Análise
 
 ✅ **Como fazer:**
+
 1. Cole o conteúdo XML completo no chat, OU
 2. Faça upload na aba "Upload"
 
 **O que o agente faz automaticamente:**
+
 1. ✅ Extrai todos os dados (emitente, itens, valores, impostos)
 2. ✅ Valida contra regras fiscais brasileiras
 3. ✅ Classifica por tipo de operação e centro de custo
@@ -108,6 +118,7 @@ Este guia mostra **exemplos de perguntas em linguagem simples** que você pode f
 5. ✅ Mostra resumo completo
 
 **Exemplo de resposta:**
+
 ```
 ✅ Documento processado e salvo com sucesso!
 
@@ -150,6 +161,7 @@ Nenhum problema encontrado!
 ## 💡 Perguntas sobre Fiscal (Conhecimento Geral)
 
 ✅ **Perguntas que funcionam:**
+
 - "O que é CFOP?"
 - "Explica o que é NCM"
 - "Qual a diferença entre NFe e NFCe?"
@@ -160,6 +172,7 @@ Nenhum problema encontrado!
 **O agente explica em linguagem simples!**
 
 **Exemplo:**
+
 ```
 📚 NCM (Nomenclatura Comum do Mercosul)
 
@@ -189,12 +202,14 @@ NCM é um código de 8 dígitos que classifica produtos no comércio internacion
 ## 📈 Estatísticas e Resumos
 
 ✅ **Perguntas que funcionam:**
+
 - "Mostra um resumo geral"
 - "Estatísticas do banco de dados"
 - "Quanto já processamos?"
 - "Resumo de documentos"
 
 **O que o agente mostra:**
+
 - Total de documentos processados
 - Breakdown por tipo (NFe, NFCe, etc.)
 - Breakdown por operação (compra, venda, etc.)
@@ -209,6 +224,7 @@ NCM é um código de 8 dígitos que classifica produtos no comércio internacion
 ### ❌ Problemas de Validação
 
 ✅ **Perguntas que funcionam:**
+
 - "Existem documentos com erros?"
 - "Mostra notas com problemas"
 - "Quais documentos têm inconsistências?"
@@ -217,6 +233,7 @@ NCM é um código de 8 dígitos que classifica produtos no comércio internacion
 ### 💰 Verificando Valores
 
 ✅ **Perguntas que funcionam:**
+
 - "Qual o valor total de compras?"
 - "Quanto gastamos em 2024?"
 - "Total de vendas do mês"
@@ -229,11 +246,13 @@ NCM é um código de 8 dígitos que classifica produtos no comércio internacion
 ### ❌ NÃO use termos técnicos desnecessários
 
 **Em vez de:**
+
 ```
 "Execute search_invoices_database com operation_type='purchase' e days_back=365"
 ```
 
 **Diga simplesmente:**
+
 ```
 "Quantas compras do ano passado?"
 ```
@@ -241,11 +260,13 @@ NCM é um código de 8 dígitos que classifica produtos no comércio internacion
 ### ❌ NÃO assuma que precisa fornecer datas exatas
 
 **Em vez de:**
+
 ```
 "Buscar documentos entre 01/01/2024 e 31/12/2024"
 ```
 
 **Diga simplesmente:**
+
 ```
 "Documentos de 2024"
 ```
@@ -253,11 +274,13 @@ NCM é um código de 8 dígitos que classifica produtos no comércio internacion
 ### ❌ NÃO use jargão fiscal se não souber
 
 **Em vez de:**
+
 ```
 "Notas com CFOP 5102"
 ```
 
 **Diga simplesmente:**
+
 ```
 "Vendas de mercadorias"
 ```
@@ -331,16 +354,20 @@ O agente vai entender e usar os códigos corretos!
 ## 🚀 Dicas para Melhores Resultados
 
 ### ✅ Seja Natural
+
 Fale como você falaria com um colega de trabalho.
 
 ### ✅ Seja Específico (quando necessário)
+
 - Em vez de "notas", especifique "notas de compra" ou "notas de venda"
 - Se souber o CNPJ, fornecê-lo ajuda na precisão
 
 ### ✅ Explore!
+
 O agente está aqui para ajudar. Faça perguntas, peça esclarecimentos, peca para ver mais detalhes.
 
 ### ✅ Use Follow-ups
+
 ```
 Você: "Quantas compras?"
 Agente: [Responde]
@@ -355,15 +382,17 @@ Agente: [Valida e responde]
 ## 📞 Precisa de Ajuda?
 
 Se o agente não entender sua pergunta:
+
 1. Reformule de forma mais simples
 2. Divida em perguntas menores
 3. Use os exemplos deste guia como referência
 
 **Exemplo:**
+
 ```
 ❌ Complexo: "Mostre análise comparativa de fluxo de caixa por tipo de operação fiscal segregado por centro de custo"
 
-✅ Simples: 
+✅ Simples:
   1. "Quantas compras temos?"
   2. "Quantas vendas temos?"
   3. "Qual o total de cada tipo?"
@@ -374,6 +403,7 @@ Se o agente não entender sua pergunta:
 ## 🎓 Aprendendo Mais
 
 À medida que usar o sistema, você aprenderá:
+
 - ✅ Termos fiscais básicos (NFe, CFOP, NCM)
 - ✅ Como interpretar validações
 - ✅ Padrões nos seus documentos
