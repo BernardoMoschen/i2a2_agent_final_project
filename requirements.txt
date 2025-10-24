@@ -30,6 +30,9 @@ pydantic-settings>=2.1.0
 python-dateutil>=2.8.2
 pytz>=2023.3
 
+# HTTP Client for External APIs
+httpx>=0.25.0
+
 # Development and Testing
 pytest>=7.4.0
 pytest-cov>=4.1.0

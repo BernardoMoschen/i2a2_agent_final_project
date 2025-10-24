@@ -1,9 +1,12 @@
 """Fiscal validation tool with declarative rules."""
 
+import logging
 from collections.abc import Callable
 from decimal import Decimal
 
 from src.models import InvoiceModel, ValidationIssue, ValidationSeverity
+
+logger = logging.getLogger(__name__)
 
 
 def validate_cnpj_cpf_digit(doc: str) -> bool:
@@ -306,6 +309,43 @@ def validate_ncm_format(ncm: str | None) -> bool:
     return ncm_clean.isdigit() and len(ncm_clean) == 8
 
 
+def validate_cnpj_active_via_api(cnpj: str, enable_api_validation: bool = True) -> bool:
+    """
+    Validate if CNPJ is active using BrasilAPI.
+    
+    This is an external API validation (VAL026) that checks:
+    - CNPJ exists in Receita Federal database
+    - CNPJ status is ATIVA (not BAIXADA, SUSPENSA, INAPTA, NULA)
+    
+    Args:
+        cnpj: CNPJ with or without formatting
+        enable_api_validation: If False, skip API call (fail-safe mode)
+    
+    Returns:
+        True if CNPJ is active or if API validation is disabled/fails (fail-safe)
+    """
+    if not enable_api_validation:
+        logger.info("API validation disabled - skipping CNPJ validation")
+        return True
+    
+    try:
+        from src.services.external_validators import CNPJValidator
+        
+        validator = CNPJValidator(timeout=5.0)
+        is_active = validator.is_cnpj_active(cnpj)
+        
+        logger.info(f"CNPJ {cnpj} API validation: {'active' if is_active else 'inactive'}")
+        return is_active
+        
+    except ImportError:
+        logger.warning("CNPJValidator not available - skipping external validation")
+        return True  # Fail-safe: don't block if module not available
+        
+    except Exception as e:
+        logger.error(f"Error validating CNPJ {cnpj} via API: {e}")
+        return True  # Fail-safe: don't block on API errors
+
+
 class ValidationRule:
     """Single validation rule."""
 
@@ -344,14 +384,17 @@ class FiscalValidatorTool:
     # Tolerance for decimal comparisons (to handle rounding differences)
     DECIMAL_TOLERANCE = Decimal("0.02")
 
-    def __init__(self, db_manager=None) -> None:
+    def __init__(self, db_manager=None, enable_api_validation: bool = True) -> None:
         """
         Initialize validator with default rules.
         
         Args:
             db_manager: Optional DatabaseManager for cross-document validations (e.g., duplicates)
+            enable_api_validation: Enable external API validations (BrasilAPI, ViaCEP, etc.)
+                                   Set to False to skip API calls (useful for offline/testing)
         """
         self.db_manager = db_manager
+        self.enable_api_validation = enable_api_validation
         self.rules = self._build_default_rules()
 
     def validate(self, invoice: InvoiceModel) -> list[ValidationIssue]:
@@ -634,6 +677,21 @@ class FiscalValidatorTool:
                 ),
                 field="items[].cfop, issuer_uf, recipient_uf",
                 suggestion="CFOP 5xxx = within state (same UF); CFOP 6xxx = outside state (different UF)",
+            ),
+            
+            # ===== EXTERNAL API VALIDATIONS (VAL026+) =====
+            
+            # VAL026: CNPJ Active Status via BrasilAPI
+            ValidationRule(
+                code="VAL026",
+                severity=ValidationSeverity.ERROR,
+                message="CNPJ is not active in Receita Federal database (BAIXADA, SUSPENSA, INAPTA, or NULA)",
+                check=lambda inv: validate_cnpj_active_via_api(
+                    inv.issuer_cnpj, 
+                    enable_api_validation=getattr(self, 'enable_api_validation', True)
+                ),
+                field="issuer_cnpj",
+                suggestion="Verify CNPJ status with supplier - inactive CNPJs cannot issue valid NFe",
             ),
         ]
     
