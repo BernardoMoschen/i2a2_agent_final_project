@@ -1,0 +1,247 @@
+{
+  "cached_at": "2025-10-24T12:47:45.386794",
+  "cache_duration_days": 7,
+  "ncm_count": 60,
+  "ncm_table": {
+    "01012100": {
+      "description": "Cavalos vivos",
+      "ipi_rate": "0"
+    },
+    "01022100": {
+      "description": "Bovinos reprodutores de raça pura",
+      "ipi_rate": "0"
+    },
+    "02011000": {
+      "description": "Carcaças e meias-carcaças de bovinos",
+      "ipi_rate": "0"
+    },
+    "04011000": {
+      "description": "Leite com teor de gordas <= 1%",
+      "ipi_rate": "0"
+    },
+    "07020000": {
+      "description": "Tomates frescos ou refrigerados",
+      "ipi_rate": "5"
+    },
+    "08030000": {
+      "description": "Bananas frescas ou secas",
+      "ipi_rate": "0"
+    },
+    "09011100": {
+      "description": "Café não torrado",
+      "ipi_rate": "0"
+    },
+    "10011000": {
+      "description": "Trigo duro",
+      "ipi_rate": "0"
+    },
+    "15071000": {
+      "description": "Óleo de soja em bruto",
+      "ipi_rate": "0"
+    },
+    "17011100": {
+      "description": "Açúcar de cana em bruto",
+      "ipi_rate": "0"
+    },
+    "19012000": {
+      "description": "Misturas para preparação de pães",
+      "ipi_rate": "0"
+    },
+    "19053100": {
+      "description": "Biscoitos",
+      "ipi_rate": "0"
+    },
+    "19059010": {
+      "description": "Pães industrializados",
+      "ipi_rate": "0"
+    },
+    "19059090": {
+      "description": "Outros pães, bolos e produtos de padaria",
+      "ipi_rate": "5"
+    },
+    "20011000": {
+      "description": "Pepinos conservados",
+      "ipi_rate": "5"
+    },
+    "21011100": {
+      "description": "Extratos de café",
+      "ipi_rate": "0"
+    },
+    "22011000": {
+      "description": "Águas minerais",
+      "ipi_rate": "5"
+    },
+    "22021000": {
+      "description": "Águas adicionadas de açúcar",
+      "ipi_rate": "20"
+    },
+    "22029000": {
+      "description": "Outras bebidas não alcoólicas",
+      "ipi_rate": "10"
+    },
+    "22030000": {
+      "description": "Cervejas de malte",
+      "ipi_rate": "15"
+    },
+    "24022000": {
+      "description": "Cigarros contendo tabaco",
+      "ipi_rate": "300"
+    },
+    "27101100": {
+      "description": "Gasolinas para motores",
+      "ipi_rate": "0"
+    },
+    "30049099": {
+      "description": "Outros medicamentos",
+      "ipi_rate": "0"
+    },
+    "33041000": {
+      "description": "Produtos de maquilagem para lábios",
+      "ipi_rate": "15"
+    },
+    "33051000": {
+      "description": "Xampus",
+      "ipi_rate": "10"
+    },
+    "33072000": {
+      "description": "Desodorantes corporais",
+      "ipi_rate": "15"
+    },
+    "39011000": {
+      "description": "Polietileno de baixa densidade",
+      "ipi_rate": "5"
+    },
+    "39023000": {
+      "description": "Copolímeros de propileno",
+      "ipi_rate": "5"
+    },
+    "40111000": {
+      "description": "Pneus novos para automóveis",
+      "ipi_rate": "5"
+    },
+    "48010000": {
+      "description": "Papel-jornal",
+      "ipi_rate": "0"
+    },
+    "52010000": {
+      "description": "Algodão não cardado",
+      "ipi_rate": "0"
+    },
+    "61091000": {
+      "description": "T-shirts e camisetas",
+      "ipi_rate": "15"
+    },
+    "61101100": {
+      "description": "Suéteres (malhas)",
+      "ipi_rate": "15"
+    },
+    "62034100": {
+      "description": "Calças de algodão",
+      "ipi_rate": "15"
+    },
+    "62052000": {
+      "description": "Camisas de algodão",
+      "ipi_rate": "15"
+    },
+    "64029100": {
+      "description": "Calçado de borracha ou plástico",
+      "ipi_rate": "15"
+    },
+    "69072100": {
+      "description": "Ladrilhos e placas cerâmicas",
+      "ipi_rate": "5"
+    },
+    "70051000": {
+      "description": "Vidro flotado",
+      "ipi_rate": "5"
+    },
+    "73011000": {
+      "description": "Estacas-pranchas de ferro",
+      "ipi_rate": "5"
+    },
+    "84131100": {
+      "description": "Bombas para combustíveis",
+      "ipi_rate": "5"
+    },
+    "84151000": {
+      "description": "Aparelhos de ar-condicionado",
+      "ipi_rate": "5"
+    },
+    "84182100": {
+      "description": "Refrigeradores domésticos",
+      "ipi_rate": "5"
+    },
+    "84713012": {
+      "description": "Notebooks e laptops",
+      "ipi_rate": "0"
+    },
+    "85011010": {
+      "description": "Motores elétricos",
+      "ipi_rate": "5"
+    },
+    "85071000": {
+      "description": "Acumuladores de chumbo",
+      "ipi_rate": "5"
+    },
+    "85161011": {
+      "description": "Aquecedores elétricos de água",
+      "ipi_rate": "5"
+    },
+    "85165000": {
+      "description": "Fornos de micro-ondas",
+      "ipi_rate": "10"
+    },
+    "85166000": {
+      "description": "Fornos e fogareiros",
+      "ipi_rate": "15"
+    },
+    "85167100": {
+      "description": "Cafeteiras elétricas",
+      "ipi_rate": "15"
+    },
+    "85167200": {
+      "description": "Torradeiras de pão",
+      "ipi_rate": "15"
+    },
+    "85171231": {
+      "description": "Telefones celulares",
+      "ipi_rate": "12"
+    },
+    "85182100": {
+      "description": "Alto-falantes múltiplos",
+      "ipi_rate": "10"
+    },
+    "85183000": {
+      "description": "Fones de ouvido",
+      "ipi_rate": "10"
+    },
+    "87032310": {
+      "description": "Automóveis com motor a explosão",
+      "ipi_rate": "25"
+    },
+    "87081000": {
+      "description": "Para-choques e suas partes",
+      "ipi_rate": "10"
+    },
+    "90041000": {
+      "description": "Óculos de sol",
+      "ipi_rate": "10"
+    },
+    "94016100": {
+      "description": "Assentos com armação de madeira",
+      "ipi_rate": "15"
+    },
+    "94035000": {
+      "description": "Móveis de madeira para dormitório",
+      "ipi_rate": "10"
+    },
+    "95030010": {
+      "description": "Triciclos e brinquedos de rodas",
+      "ipi_rate": "30"
+    },
+    "96081000": {
+      "description": "Canetas esferográficas",
+      "ipi_rate": "10"
+    }
+  }
+}

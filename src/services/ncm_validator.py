@@ -1,114 +1,74 @@
-"""NCM validator using IBGE/TIPI table."""
+"""
+NCM validator using official Brazilian government APIs.
 
-import csv
+Auto-downloads NCM table from official sources. Perfect for Streamlit Cloud deployment.
+"""
+
 import logging
-from pathlib import Path
-from typing import Set
-
-import httpx
+from typing import Set, Optional, Dict
 
 logger = logging.getLogger(__name__)
 
 
 class NCMValidator:
     """
-    Validate NCM codes against IBGE/TIPI table.
+    Validate NCM codes against IBGE/TIPI table (auto-downloaded from APIs).
     
     NCM (Nomenclatura Comum do Mercosul) is an 8-digit code used to classify
     products for tax and customs purposes.
+    
+    Features:
+    - Auto-downloads from official government APIs
+    - 7-day cache (configurable)
+    - No manual file management needed
+    - Perfect for Streamlit Cloud deployment
     """
     
-    # Simplified NCM table URL (we'll use a hardcoded subset for now)
-    # In production, download from: https://www.gov.br/receitafederal/
-    VALID_NCM_FILE = Path(__file__).parent.parent.parent / "data" / "ncm_codes.csv"
-    
     def __init__(self):
-        """Initialize NCM validator."""
+        """Initialize NCM validator with auto-download from API."""
         self._valid_ncms: Set[str] = set()
+        self._ncm_table: Dict[str, Dict] = {}
         self._load_ncm_table()
     
     def _load_ncm_table(self):
-        """Load NCM codes from local file or create default table."""
-        if self.VALID_NCM_FILE.exists():
-            try:
-                with open(self.VALID_NCM_FILE, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        ncm = row.get("ncm", "").strip()
-                        if ncm and len(ncm) == 8 and ncm.isdigit():
-                            self._valid_ncms.add(ncm)
-                
-                logger.info(f"Loaded {len(self._valid_ncms)} NCM codes from {self.VALID_NCM_FILE}")
-            except Exception as e:
-                logger.error(f"Error loading NCM table: {e}")
-                self._create_default_table()
-        else:
-            logger.warning(f"NCM table not found at {self.VALID_NCM_FILE} - creating default table")
-            self._create_default_table()
-    
-    def _create_default_table(self):
-        """
-        Create a default NCM table with common codes.
-        
-        In production, this should download the full table from Receita Federal.
-        For now, we'll use a subset of common NCMs.
-        """
-        # Common NCMs from various sectors
-        common_ncms = [
-            # Food & Beverages
-            "19059090",  # Pães, bolos, etc
-            "22030000",  # Cerveja
-            "22021000",  # Água mineral
-            "04022110",  # Leite em pó
-            "02013000",  # Carne bovina fresca/refrigerada
-            
-            # Electronics
-            "85171231",  # Telefones celulares
-            "84713012",  # Notebooks
-            "85176255",  # Adaptadores/carregadores
-            "84717012",  # Unidades de disco rígido
-            
-            # Clothing
-            "61091000",  # Camisetas de algodão
-            "62034200",  # Calças jeans
-            "64039900",  # Calçados
-            
-            # Automotive
-            "87032310",  # Automóveis 1.0-1.5
-            "40111000",  # Pneus novos
-            "87089900",  # Peças para veículos
-            
-            # Pharmaceuticals
-            "30049099",  # Medicamentos
-            "30051010",  # Curativos
-            
-            # Construction
-            "68109900",  # Materiais de construção
-            "25232900",  # Cimento portland
-            "44111390",  # Painéis de fibra
-            
-            # Office supplies
-            "48201000",  # Cadernos
-            "96081099",  # Canetas
-            "84433210",  # Impressoras
-        ]
-        
-        self._valid_ncms = set(common_ncms)
-        
-        # Create data directory if doesn't exist
-        self.VALID_NCM_FILE.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Save default table
+        """Load NCM codes from API (auto-downloads and caches)."""
         try:
-            with open(self.VALID_NCM_FILE, "w", encoding="utf-8", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=["ncm", "description"])
-                writer.writeheader()
-                for ncm in sorted(self._valid_ncms):
-                    writer.writerow({"ncm": ncm, "description": f"NCM {ncm}"})
+            # Import here to avoid circular dependency
+            from src.services.ncm_api import get_ncm_table
             
-            logger.info(f"Created default NCM table with {len(self._valid_ncms)} codes at {self.VALID_NCM_FILE}")
+            # Auto-download from API (uses cache if valid)
+            self._ncm_table = get_ncm_table()
+            self._valid_ncms = set(self._ncm_table.keys())
+            
+            logger.info(f"Loaded {len(self._valid_ncms)} NCM codes from API/cache")
+            
         except Exception as e:
-            logger.error(f"Error creating default NCM table: {e}")
+            logger.error(f"Error loading NCM table from API: {e}")
+            self._create_fallback_table()
+    
+    def _create_fallback_table(self):
+        """
+        Create minimal fallback table if API fails.
+        
+        This should rarely be needed - only if API is down AND cache expired.
+        """
+        logger.warning("Creating minimal fallback NCM table")
+        
+        # Minimal NCM subset (most common codes)
+        fallback_ncms = {
+            "19059090": {"description": "Pães, bolos, etc", "ipi_rate": "5"},
+            "22030000": {"description": "Cerveja", "ipi_rate": "15"},
+            "85171231": {"description": "Telefones celulares", "ipi_rate": "12"},
+            "84713012": {"description": "Notebooks", "ipi_rate": "0"},
+            "61091000": {"description": "Camisetas", "ipi_rate": "15"},
+            "87032310": {"description": "Automóveis", "ipi_rate": "25"},
+            "30049099": {"description": "Medicamentos", "ipi_rate": "0"},
+        }
+        
+        self._ncm_table = fallback_ncms
+        self._valid_ncms = set(fallback_ncms.keys())
+        
+        logger.info(f"Fallback table created with {len(self._valid_ncms)} NCM codes")
     
     def is_valid_ncm(self, ncm: str) -> bool:
         """
@@ -137,34 +97,56 @@ class NCMValidator:
         # Check if NCM exists in table
         return ncm_clean in self._valid_ncms
     
+    def get_ncm_info(self, ncm: str) -> Optional[Dict]:
+        """
+        Get information about a specific NCM code.
+        
+        Args:
+            ncm: NCM code (8 digits)
+        
+        Returns:
+            Dict with {description, ipi_rate} or None if not found
+        """
+        if not ncm:
+            return None
+        
+        ncm_clean = ncm.strip()
+        return self._ncm_table.get(ncm_clean)
+    
     def get_table_size(self) -> int:
         """Get number of NCM codes in table."""
         return len(self._valid_ncms)
     
-    async def download_full_ncm_table(self, url: str | None = None) -> bool:
+    def refresh_table(self, force: bool = False):
         """
-        Download full NCM table from official source.
-        
-        This is a placeholder - in production, implement download from:
-        https://www.gov.br/receitafederal/pt-br/assuntos/aduana-e-comercio-exterior/
+        Refresh NCM table from API.
         
         Args:
-            url: Optional custom URL for NCM table
-        
-        Returns:
-            True if download successful
+            force: Force download even if cache is valid
         """
-        logger.warning("Full NCM table download not yet implemented")
-        logger.warning("Using default subset of common NCM codes")
-        return False
+        try:
+            from src.services.ncm_api import get_ncm_table
+            
+            self._ncm_table = get_ncm_table(force_refresh=force)
+            self._valid_ncms = set(self._ncm_table.keys())
+            
+            logger.info(f"Refreshed NCM table: {len(self._valid_ncms)} codes loaded")
+            
+        except Exception as e:
+            logger.error(f"Error refreshing NCM table: {e}")
 
 
 # Global instance (lazy loading)
-_ncm_validator: NCMValidator | None = None
+_ncm_validator: Optional[NCMValidator] = None
 
 
 def get_ncm_validator() -> NCMValidator:
-    """Get global NCM validator instance (singleton)."""
+    """
+    Get global NCM validator instance (singleton).
+    
+    Returns:
+        NCMValidator: Global validator instance
+    """
     global _ncm_validator
     if _ncm_validator is None:
         _ncm_validator = NCMValidator()
