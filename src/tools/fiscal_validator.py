@@ -346,6 +346,157 @@ def validate_cnpj_active_via_api(cnpj: str, enable_api_validation: bool = True) 
         return True  # Fail-safe: don't block on API errors
 
 
+def validate_cep_municipio_uf(cep: str, municipio: str, uf: str, enable_api_validation: bool = True) -> bool:
+    """
+    Validate if CEP matches município and UF using ViaCEP API.
+    
+    This is VAL027 - validates geographic consistency.
+    
+    Args:
+        cep: CEP (postal code) with or without formatting
+        municipio: Expected município (city)
+        uf: Expected UF (state)
+        enable_api_validation: If False, skip API call (fail-safe mode)
+    
+    Returns:
+        True if CEP matches município/UF or if API validation is disabled/fails (fail-safe)
+    """
+    if not enable_api_validation:
+        return True
+    
+    if not cep or not municipio or not uf:
+        return True  # Skip if data missing
+    
+    try:
+        from src.services.external_validators import CEPValidator
+        
+        validator = CEPValidator(timeout=5.0)
+        matches = validator.validate_cep_municipio(cep, municipio, uf)
+        
+        logger.info(f"CEP {cep} validation for {municipio}/{uf}: {'matches' if matches else 'mismatch'}")
+        return matches
+        
+    except ImportError:
+        logger.warning("CEPValidator not available - skipping validation")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error validating CEP {cep}: {e}")
+        return True
+
+
+def validate_razao_social_cnpj(cnpj: str, declared_name: str, enable_api_validation: bool = True) -> bool:
+    """
+    Validate if declared razão social matches CNPJ data from BrasilAPI.
+    
+    This is VAL029 - cross-validation of company name.
+    
+    Args:
+        cnpj: CNPJ with or without formatting
+        declared_name: Declared razão social from XML
+        enable_api_validation: If False, skip API call (fail-safe mode)
+    
+    Returns:
+        True if names match (fuzzy) or if API validation is disabled/fails (fail-safe)
+    """
+    if not enable_api_validation:
+        return True
+    
+    if not cnpj or not declared_name:
+        return True  # Skip if data missing
+    
+    try:
+        from src.services.external_validators import CNPJValidator
+        
+        validator = CNPJValidator(timeout=5.0)
+        matches = validator.validate_razao_social(cnpj, declared_name, threshold=0.7)
+        
+        logger.info(f"Razão social validation for CNPJ {cnpj}: {'matches' if matches else 'mismatch'}")
+        return matches
+        
+    except ImportError:
+        logger.warning("CNPJValidator not available - skipping validation")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error validating razão social for CNPJ {cnpj}: {e}")
+        return True
+
+
+def validate_ncm_exists(ncm: str) -> bool:
+    """
+    Validate if NCM code exists in TIPI table.
+    
+    This is VAL028 - validates NCM against official table.
+    
+    Args:
+        ncm: NCM code (8 digits)
+    
+    Returns:
+        True if NCM exists in table
+    """
+    if not ncm:
+        return True  # Skip if missing
+    
+    try:
+        from src.services.ncm_validator import get_ncm_validator
+        
+        validator = get_ncm_validator()
+        is_valid = validator.is_valid_ncm(ncm)
+        
+        if not is_valid:
+            logger.warning(f"NCM {ncm} not found in TIPI table")
+        
+        return is_valid
+        
+    except ImportError:
+        logger.warning("NCMValidator not available - skipping validation")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error validating NCM {ncm}: {e}")
+        return True
+
+
+def validate_ie_state(ie: str, uf: str) -> bool:
+    """
+    Validate Inscrição Estadual check digit for state.
+    
+    This is VAL040 - validates IE format and check digit per state.
+    
+    Args:
+        ie: Inscrição Estadual with or without formatting
+        uf: State code (e.g., "SP", "RJ")
+    
+    Returns:
+        True if IE is valid for the state
+    """
+    if not ie or not uf:
+        return True  # Skip if missing (IE is optional)
+    
+    # Special case: ISENTO (exempt)
+    if ie.upper().strip() == "ISENTO":
+        return True
+    
+    try:
+        from src.services.ie_validator import validate_ie
+        
+        is_valid = validate_ie(ie, uf)
+        
+        if not is_valid:
+            logger.warning(f"IE {ie} invalid for state {uf}")
+        
+        return is_valid
+        
+    except ImportError:
+        logger.warning("IEValidator not available - skipping validation")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error validating IE {ie} for {uf}: {e}")
+        return True
+
+
 class ValidationRule:
     """Single validation rule."""
 
@@ -692,6 +843,62 @@ class FiscalValidatorTool:
                 ),
                 field="issuer_cnpj",
                 suggestion="Verify CNPJ status with supplier - inactive CNPJs cannot issue valid NFe",
+            ),
+            
+            # VAL027: CEP × Município/UF via ViaCEP
+            ValidationRule(
+                code="VAL027",
+                severity=ValidationSeverity.WARNING,
+                message="Issuer CEP does not match declared município/UF",
+                check=lambda inv: validate_cep_municipio_uf(
+                    inv.issuer_cep or "",
+                    inv.issuer_municipio or "",
+                    inv.issuer_uf or "",
+                    enable_api_validation=getattr(self, 'enable_api_validation', True)
+                ),
+                field="issuer_cep, issuer_municipio, issuer_uf",
+                suggestion="Verify issuer address - CEP doesn't match município/UF according to ViaCEP",
+            ),
+            
+            # VAL028: NCM Exists in TIPI Table
+            ValidationRule(
+                code="VAL028",
+                severity=ValidationSeverity.WARNING,
+                message="One or more NCM codes not found in TIPI/IBGE table",
+                check=lambda inv: all(
+                    validate_ncm_exists(item.ncm) for item in inv.items if item.ncm
+                ),
+                field="items[].ncm",
+                suggestion="Verify NCM codes - one or more codes don't exist in official TIPI table",
+            ),
+            
+            # VAL029: Razão Social × CNPJ Cross-Validation
+            ValidationRule(
+                code="VAL029",
+                severity=ValidationSeverity.WARNING,
+                message="Declared razão social doesn't match CNPJ data from Receita Federal",
+                check=lambda inv: validate_razao_social_cnpj(
+                    inv.issuer_cnpj,
+                    inv.issuer_name,
+                    enable_api_validation=getattr(self, 'enable_api_validation', True)
+                ),
+                field="issuer_name, issuer_cnpj",
+                suggestion="Verify issuer name - declared razão social doesn't match Receita Federal data (fuzzy match threshold: 70%)",
+            ),
+            
+            # ===== FISCAL IDENTIFIER VALIDATIONS (VAL040+) =====
+            
+            # VAL040: Inscrição Estadual Check Digit
+            ValidationRule(
+                code="VAL040",
+                severity=ValidationSeverity.ERROR,
+                message="Issuer Inscrição Estadual (IE) has invalid check digit for state",
+                check=lambda inv: validate_ie_state(
+                    inv.issuer_ie or "",
+                    inv.issuer_uf or ""
+                ),
+                field="issuer_ie, issuer_uf",
+                suggestion="Verify Inscrição Estadual - check digit validation failed for this state",
             ),
         ]
     

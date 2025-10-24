@@ -110,9 +110,17 @@ class InvoiceModel(BaseModel):
     )
     recipient_name: str | None = Field(None, description="Recipient name")
     
-    # Geographic data (VAL022, VAL025)
+    # Geographic data (VAL022, VAL025, VAL027)
     issuer_uf: str | None = Field(None, description="Issuer state (UF)")
     recipient_uf: str | None = Field(None, description="Recipient state (UF)")
+    issuer_municipio: str | None = Field(None, description="Issuer municipality")
+    recipient_municipio: str | None = Field(None, description="Recipient municipality")
+    issuer_cep: str | None = Field(None, description="Issuer CEP (postal code)")
+    recipient_cep: str | None = Field(None, description="Recipient CEP (postal code)")
+    
+    # Fiscal identifiers (VAL040)
+    issuer_ie: str | None = Field(None, description="Issuer state registration (Inscrição Estadual)")
+    recipient_ie: str | None = Field(None, description="Recipient state registration (Inscrição Estadual)")
     
     # Fiscal regime (VAL018)
     tax_regime: str | None = Field(None, description="Tax regime (CRT): 1=Simples, 2=Simples excesso, 3=Normal")
