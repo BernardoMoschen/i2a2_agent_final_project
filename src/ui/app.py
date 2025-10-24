@@ -2,6 +2,7 @@
 
 import logging
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Add project root to path
@@ -116,27 +117,72 @@ def main() -> None:
             if st.button("🔍 Process All Files", type="primary", use_container_width=True):
                 processor = FileProcessor()
 
-                # Initialize progress
+                # Initialize progress tracking
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                stats_container = st.container()
 
                 all_results = []
+                total_files = len(uploaded_files)
+                processed_count = 0
+                error_count = 0
+                
+                # Estimate processing time (rough estimate: 2 seconds per file)
+                estimated_time = total_files * 2
+                start_time = datetime.now()
 
                 # Process each file
                 for idx, uploaded_file in enumerate(uploaded_files):
-                    status_text.text(f"Processing {uploaded_file.name}...")
+                    # Update status with file name and progress
+                    status_text.markdown(
+                        f"🔄 **Processing:** `{uploaded_file.name}` "
+                        f"({idx + 1}/{total_files})"
+                    )
 
-                    # Read file content
-                    file_content = uploaded_file.read()
+                    try:
+                        # Read file content
+                        file_content = uploaded_file.read()
 
-                    # Process file
-                    results = processor.process_file(file_content, uploaded_file.name)
-                    all_results.extend(results)
+                        # Process file
+                        results = processor.process_file(file_content, uploaded_file.name)
+                        all_results.extend(results)
+                        processed_count += len(results)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing {uploaded_file.name}: {e}", exc_info=True)
+                        error_count += 1
+                        # Show error but continue processing
+                        status_text.error(f"❌ Error in {uploaded_file.name}: {str(e)}")
 
-                    # Update progress
-                    progress_bar.progress((idx + 1) / len(uploaded_files))
+                    # Update progress bar
+                    progress = (idx + 1) / total_files
+                    progress_bar.progress(progress)
+                    
+                    # Calculate and display estimated time remaining
+                    elapsed_time = (datetime.now() - start_time).total_seconds()
+                    if idx > 0:
+                        avg_time_per_file = elapsed_time / (idx + 1)
+                        remaining_files = total_files - (idx + 1)
+                        estimated_remaining = remaining_files * avg_time_per_file
+                        
+                        with stats_container:
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Processed", f"{idx + 1}/{total_files}")
+                            with col2:
+                                st.metric("Documents", processed_count)
+                            with col3:
+                                st.metric("Errors", error_count)
+                            with col4:
+                                st.metric("ETA", f"{int(estimated_remaining)}s")
 
-                status_text.text(f"✅ Processed {len(all_results)} document(s)")
+                # Final status
+                elapsed = (datetime.now() - start_time).total_seconds()
+                status_text.success(
+                    f"✅ **Processing Complete!** "
+                    f"{processed_count} document(s) from {total_files} file(s) in {elapsed:.1f}s "
+                    f"({error_count} errors)"
+                )
                 progress_bar.empty()
 
                 # Store results in session state
@@ -278,8 +324,6 @@ def main() -> None:
             st.session_state.history_page = 1
 
         # Build filters for database query
-        from datetime import datetime, timedelta
-        
         db_filters = {}
         if filter_type != "All":
             db_filters["invoice_type"] = filter_type

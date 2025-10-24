@@ -13,15 +13,18 @@ Este guia explica como **expandir a tabela NCM** de 23 códigos para a **tabela 
 #### **Fonte: Receita Federal do Brasil**
 
 1. **Acesse o site da Receita Federal**:
+
    ```
    https://www.gov.br/receitafederal/pt-br
    ```
 
 2. **Busque por "TIPI"** ou navegue:
+
    - Menu: Acesso à Informação → Legislação
    - Procure: "Tabela de Incidência do IPI - TIPI"
 
 3. **Baixe a tabela** (disponível em):
+
    - **PDF** (mais comum) - requer conversão
    - **Excel/CSV** (ideal) - pode ser usado diretamente
    - **Anexo ao Decreto nº 11.158/2022** (última versão)
@@ -33,6 +36,7 @@ Este guia explica como **expandir a tabela NCM** de 23 códigos para a **tabela 
    ```
 
 #### **Formato Esperado**:
+
 ```csv
 ncm,description,ipi_rate
 01011000,Cavalos reprodutores de raça pura,0
@@ -46,21 +50,25 @@ ncm,description,ipi_rate
 ### **Opção 2: IBGE - Sistema de Nomenclaturas**
 
 1. **Acesse CONCLA (Comissão Nacional de Classificação)**:
+
    ```
    https://concla.ibge.gov.br/classificacoes
    ```
 
 2. **Navegue até NCM**:
+
    - Classificações → Produtos → NCM
 
 3. **Baixe a tabela completa** (Excel ou CSV)
 
 **Vantagens**:
+
 - ✅ Dados oficiais do IBGE
 - ✅ Atualização periódica
 - ✅ Formato estruturado
 
 **Desvantagens**:
+
 - ⚠️ Pode não incluir alíquotas de IPI
 - ⚠️ Requer processamento adicional
 
@@ -69,21 +77,25 @@ ncm,description,ipi_rate
 ### **Opção 3: Sistema Siscomex (Para Importação)**
 
 1. **Portal Siscomex**:
+
    ```
    https://www.gov.br/siscomex/
    ```
 
-2. **Acesse**: 
+2. **Acesse**:
+
    - Simulador de Tratamento Tributário e Administrativo
    - Tabela TEC (Tarifa Externa Comum)
 
 3. **Baixe a TEC** (contém NCM + Imposto de Importação)
 
 **Vantagens**:
+
 - ✅ Inclui Imposto de Importação (II)
 - ✅ Tarifa Externa Comum do Mercosul
 
 **Desvantagens**:
+
 - ⚠️ Foco em importação
 - ⚠️ Não inclui IPI doméstico
 
@@ -97,6 +109,7 @@ ncm,description,ipi_rate
 - Buscar por: "NCM", "TIPI", "IPI"
 
 **Quando disponível**:
+
 ```python
 import requests
 
@@ -117,6 +130,7 @@ python scripts/download_ncm_table.py --source sample --output data/ncm_codes.csv
 ```
 
 **Resultado**:
+
 ```
 ✅ Created expanded sample with 120 NCM codes
    Saved to: data/ncm_codes.csv
@@ -143,6 +157,7 @@ python scripts/download_ncm_table.py \
 ```
 
 **O script vai**:
+
 1. ✅ Ler o arquivo CSV/Excel
 2. ✅ Validar formato NCM (8 dígitos)
 3. ✅ Remover duplicatas
@@ -160,16 +175,19 @@ Se você só tem o PDF da Receita Federal:
 Use ferramentas online ou locais:
 
 **Online** (gratuito):
+
 - https://www.ilovepdf.com/pdf_to_excel
 - https://smallpdf.com/pdf-to-excel
 
 **Local** (Python):
+
 ```bash
 pip install tabula-py
 python -c "import tabula; tabula.convert_into('tipi.pdf', 'tipi.csv', pages='all')"
 ```
 
 #### **Passo 2: Processar CSV gerado**
+
 ```bash
 python scripts/download_ncm_table.py \
     --source manual \
@@ -193,6 +211,7 @@ NCM: 8 5 1 7 1 2 3 1
 ```
 
 **Exemplo**: `85171231`
+
 - **85**: Capítulo 85 - Máquinas e aparelhos elétricos
 - **8517**: Posição - Aparelhos telefônicos
 - **851712**: Subposição - Telefones para redes celulares
@@ -202,33 +221,34 @@ NCM: 8 5 1 7 1 2 3 1
 
 A tabela está organizada em **21 seções** e **96 capítulos**:
 
-| Capítulos | Seção | Descrição |
-|-----------|-------|-----------|
-| 01-05 | I | Animais vivos e produtos do reino animal |
-| 06-14 | II | Produtos do reino vegetal |
-| 15 | III | Gorduras e óleos |
-| 16-24 | IV | Produtos alimentícios, bebidas e fumo |
-| 25-27 | V | Produtos minerais |
-| 28-38 | VI | Produtos das indústrias químicas |
-| 39-40 | VII | Plásticos e borracha |
-| 41-43 | VIII | Peles e couros |
-| 44-46 | IX | Madeira e cortiça |
-| 47-49 | X | Pasta de madeira, papel |
-| 50-63 | XI | Matérias têxteis |
-| 64-67 | XII | Calçados, chapéus |
-| 68-70 | XIII | Obras de pedra, cerâmica, vidro |
-| 71 | XIV | Pérolas, pedras preciosas, metais preciosos |
-| 72-83 | XV | Metais comuns |
-| 84-85 | XVI | Máquinas e aparelhos elétricos |
-| 86-89 | XVII | Material de transporte |
-| 90-92 | XVIII | Instrumentos de precisão, óptica, música |
-| 94-96 | XX | Mercadorias e produtos diversos |
+| Capítulos | Seção | Descrição                                   |
+| --------- | ----- | ------------------------------------------- |
+| 01-05     | I     | Animais vivos e produtos do reino animal    |
+| 06-14     | II    | Produtos do reino vegetal                   |
+| 15        | III   | Gorduras e óleos                            |
+| 16-24     | IV    | Produtos alimentícios, bebidas e fumo       |
+| 25-27     | V     | Produtos minerais                           |
+| 28-38     | VI    | Produtos das indústrias químicas            |
+| 39-40     | VII   | Plásticos e borracha                        |
+| 41-43     | VIII  | Peles e couros                              |
+| 44-46     | IX    | Madeira e cortiça                           |
+| 47-49     | X     | Pasta de madeira, papel                     |
+| 50-63     | XI    | Matérias têxteis                            |
+| 64-67     | XII   | Calçados, chapéus                           |
+| 68-70     | XIII  | Obras de pedra, cerâmica, vidro             |
+| 71        | XIV   | Pérolas, pedras preciosas, metais preciosos |
+| 72-83     | XV    | Metais comuns                               |
+| 84-85     | XVI   | Máquinas e aparelhos elétricos              |
+| 86-89     | XVII  | Material de transporte                      |
+| 90-92     | XVIII | Instrumentos de precisão, óptica, música    |
+| 94-96     | XX    | Mercadorias e produtos diversos             |
 
 ---
 
 ## 🔧 Formato do CSV Gerado
 
 ### **Formato Mínimo (Requerido)**:
+
 ```csv
 ncm,description
 19059090,Outros pães, bolos e produtos de padaria
@@ -236,6 +256,7 @@ ncm,description
 ```
 
 ### **Formato Completo (Recomendado)**:
+
 ```csv
 ncm,description,ipi_rate
 19059090,Outros pães, bolos e produtos de padaria,5
@@ -244,6 +265,7 @@ ncm,description,ipi_rate
 ```
 
 ### **Formato Estendido (Opcional)**:
+
 ```csv
 ncm,description,ipi_rate,chapter,section,notes
 19059090,Outros pães, bolos e produtos de padaria,5,19,IV,Produtos de padaria
@@ -291,13 +313,13 @@ python examples/demo_high_impact_validations.py
 
 ### **Comparação**:
 
-| Métrica | Sample Atual | TIPI Completa |
-|---------|--------------|---------------|
-| NCMs | 23 | ~10.000 |
-| Cobertura | ~0.2% | 100% |
-| Capítulos | 16 | 96 |
-| Arquivo | ~2 KB | ~500 KB |
-| Load time | < 1ms | ~50ms |
+| Métrica   | Sample Atual | TIPI Completa |
+| --------- | ------------ | ------------- |
+| NCMs      | 23           | ~10.000       |
+| Cobertura | ~0.2%        | 100%          |
+| Capítulos | 16           | 96            |
+| Arquivo   | ~2 KB        | ~500 KB       |
+| Load time | < 1ms        | ~50ms         |
 
 ---
 
@@ -339,7 +361,7 @@ def validate_ipi_rate(item, expected_rate):
     """Validate IPI rate matches NCM table."""
     ncm_validator = get_ncm_validator()
     official_rate = ncm_validator.get_ipi_rate(item.ncm)
-    
+
     if official_rate and item.ipi_rate != official_rate:
         return ValidationIssue(
             code="VAL041",
@@ -366,17 +388,20 @@ def validate_icms_rate_by_ncm_uf(ncm, uf, declared_rate):
 ## 📚 Recursos Adicionais
 
 ### **Legislação**:
+
 - Decreto nº 11.158/2022 (TIPI atualizada)
 - Lei nº 10.637/2002 (PIS/PASEP)
 - Lei nº 10.833/2003 (COFINS)
 
 ### **Sites Oficiais**:
+
 - Receita Federal: https://www.gov.br/receitafederal/
 - IBGE CONCLA: https://concla.ibge.gov.br/
 - Siscomex: https://www.gov.br/siscomex/
 - Dados Abertos: https://dados.gov.br/
 
 ### **Ferramentas Úteis**:
+
 - Consulta NCM: http://www4.receita.fazenda.gov.br/simulador/
 - Classificação Fiscal: https://www.gov.br/produtividade-e-comercio-exterior/
 

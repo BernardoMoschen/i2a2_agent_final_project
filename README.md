@@ -48,6 +48,66 @@ projeto_final/
 ### Prerequisites
 
 - Python 3.11 or higher
+- Google Gemini API key (get at https://makersuite.google.com/app/apikey)
+
+### Local Development
+
+1. Clone the repository:
+```bash
+git clone https://github.com/BernardoMoschen/i2a2_agent_final_project.git
+cd i2a2_agent_final_project
+```
+
+2. Create virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# or
+venv\Scripts\activate  # Windows
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Configure secrets:
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+# Edit .streamlit/secrets.toml and add your GEMINI_API_KEY
+```
+
+5. Run Streamlit app:
+```bash
+streamlit run src/ui/app.py
+```
+
+### Streamlit Cloud Deployment
+
+1. **Fork/Push** this repo to GitHub
+
+2. **Go to** [share.streamlit.io](https://share.streamlit.io)
+
+3. **Click** "New app" and select your repo
+
+4. **Configure**:
+   - Main file path: `src/ui/app.py`
+   - Python version: 3.11
+
+5. **Add Secrets** (Settings → Secrets):
+   ```toml
+   GEMINI_API_KEY = "your-api-key-here"
+   ENABLE_API_VALIDATION = true
+   ```
+
+6. **Deploy** - Done! 🚀
+
+The app will:
+- ✅ Auto-download NCM table from APIs (7-day cache)
+- ✅ Auto-validate CNPJs via BrasilAPI  
+- ✅ Auto-validate CEPs via ViaCEP
+- ✅ Create cache directories automatically
+- ✅ No manual file setup needed!
 - pip or uv for package management
 
 ### Installation
