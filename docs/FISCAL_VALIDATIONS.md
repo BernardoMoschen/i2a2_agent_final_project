@@ -25,7 +25,9 @@ Upload XML → Parse → VALIDAÇÃO → Classificação → Save Database
 
 ## Validações Implementadas Atualmente
 
-### 1. Validação de Chave de Acesso (VAL001)
+### **🔵 VALIDAÇÕES BÁSICAS (VAL001-VAL010)**
+
+### 1. Validação de Chave de Acesso - Formato (VAL001)
 
 - **Severidade:** ERROR ❌
 - **Regra:** Chave de acesso deve ter exatamente 44 dígitos numéricos
@@ -163,6 +165,268 @@ Total declarado: R$ 33.50 → ❌ FAIL (diferença > 0.02)
 ✅ Valid:   issue_date = 16/10/2025 (hoje)
 ❌ Invalid: issue_date = 17/10/2025 (futuro)
 ```
+
+---
+
+### **🟢 VALIDAÇÕES AVANÇADAS - PRIORIDADE ALTA (VAL011-VAL017)**
+
+### 11. Validação de Dígito Verificador do CNPJ (VAL011) ⭐ NOVO
+
+- **Severidade:** ERROR ❌
+- **Regra:** CNPJ deve ter dígito verificador válido (algoritmo mod-11)
+- **Campo:** `issuer_cnpj`
+- **Sugestão:** "Verify CNPJ is correct - check digit validation failed"
+- **Algoritmo:** Calcula os 2 últimos dígitos do CNPJ e valida
+
+```python
+✅ Valid:   "11.222.333/0001-81" → DV correto
+❌ Invalid: "11.222.333/0001-99" → DV incorreto
+❌ Invalid: "00.000.000/0000-00" → CNPJ inválido (todos zeros)
+```
+
+**Como funciona:**
+
+1. Remove formatação: `11.222.333/0001-81` → `11222333000181`
+2. Calcula 1º dígito verificador com pesos [5,4,3,2,9,8,7,6,5,4,3,2]
+3. Calcula 2º dígito verificador com pesos [6,5,4,3,2,9,8,7,6,5,4,3,2]
+4. Compara com os 2 últimos dígitos do CNPJ
+
+### 12. Validação de Dígito Verificador da Chave de Acesso (VAL012) ⭐ NOVO
+
+- **Severidade:** ERROR ❌
+- **Regra:** Chave de acesso deve ter 44º dígito verificador válido (mod-11)
+- **Campo:** `document_key`
+- **Sugestão:** "Access key check digit (mod 11) validation failed - verify key integrity"
+- **Algoritmo:** Calcula o dígito verificador dos primeiros 43 dígitos
+
+```python
+✅ Valid:   "35240512345678000190650010000001231234567890" → DV=0 correto
+❌ Invalid: "35240512345678000190650010000001231234567899" → DV incorreto
+```
+
+**Importância:**
+
+- Detecta erros de digitação na chave
+- Valida integridade da chave NFe
+- Previne fraudes com chaves adulteradas
+
+### 13. Validação CFOP × Tipo de Operação (VAL013) ⭐ NOVO
+
+- **Severidade:** ERROR ❌
+- **Regra:** CFOP deve ser consistente com o tipo de operação classificado
+- **Campo:** `operation_type` / `items[].cfop`
+- **Sugestão:** "Verify CFOP range: 1xxx/2xxx=entry, 5xxx/6xxx=exit, 3xxx=transfer"
+
+```python
+# REGRAS:
+Compra (purchase):  CFOP deve começar com 1 ou 2
+Venda (sale):       CFOP deve começar com 5 ou 6
+Transferência:      CFOP deve começar com 5, 6 ou 3
+Devolução (return): CFOP deve começar com 1 ou 2
+
+# EXEMPLOS:
+✅ Valid:   operation_type='purchase' + CFOP='1102' (compra dentro do estado)
+✅ Valid:   operation_type='sale' + CFOP='5102' (venda dentro do estado)
+✅ Valid:   operation_type='sale' + CFOP='6102' (venda fora do estado)
+❌ Invalid: operation_type='purchase' + CFOP='5102' (CFOP de saída em compra!)
+❌ Invalid: operation_type='sale' + CFOP='1102' (CFOP de entrada em venda!)
+```
+
+**Detecção de Erros Comuns:**
+
+- Nota classificada como "compra" mas com CFOP de venda
+- Nota classificada como "venda" mas com CFOP de compra
+- Inconsistência entre natureza e direção fiscal
+
+### 14. Validação de Cálculo ICMS (VAL014) ⭐ NOVO
+
+- **Severidade:** WARNING ⚠️
+- **Regra:** `icms_base × (icms_rate / 100) ≈ icms_value` (tolerância ±0.02)
+- **Campo:** `items[].icms_value`
+- **Sugestão:** "Verify ICMS base, rate, and value - recalculate: base × (rate/100) = value"
+
+```python
+# EXEMPLO CORRETO:
+Base ICMS:   R$ 1.000,00
+Alíquota:    18%
+Cálculo:     1.000,00 × 0,18 = R$ 180,00
+ICMS valor:  R$ 180,00 ✅
+
+# EXEMPLO INCORRETO:
+Base ICMS:   R$ 1.000,00
+Alíquota:    18%
+ICMS valor:  R$ 150,00 ❌ (deveria ser R$ 180,00)
+```
+
+### 15. Validação de Cálculo PIS (VAL015) ⭐ NOVO
+
+- **Severidade:** WARNING ⚠️
+- **Regra:** `pis_base × (pis_rate / 100) ≈ pis_value` (tolerância ±0.02)
+- **Campo:** `items[].pis_value`
+- **Sugestão:** "Verify PIS base, rate, and value - recalculate: base × (rate/100) = value"
+
+### 16. Validação de Cálculo COFINS (VAL016) ⭐ NOVO
+
+- **Severidade:** WARNING ⚠️
+- **Regra:** `cofins_base × (cofins_rate / 100) ≈ cofins_value` (tolerância ±0.02)
+- **Campo:** `items[].cofins_value`
+- **Sugestão:** "Verify COFINS base, rate, and value - recalculate: base × (rate/100) = value"
+
+### 17. Detecção de Duplicatas (VAL017) ⭐ NOVO
+
+- **Severidade:** ERROR ❌
+- **Regra:** Chave de acesso não pode já existir no banco de dados
+- **Campo:** `document_key`
+- **Sugestão:** "This document was already processed - check for resubmission or duplicate file"
+- **Requer:** Integração com banco de dados
+
+```python
+# CENÁRIO:
+1. Usuário faz upload de NFe-123.xml → Salvo no BD ✅
+2. Usuário faz upload de NFe-123.xml novamente → ❌ VAL017: Duplicata detectada!
+
+# PREVINE:
+- Reprocessamento acidental
+- Duplicação de registros contábeis
+- Inflação artificial de totais/estatísticas
+```
+
+---
+
+### **🟢 VALIDAÇÕES FASE 2/3 - PRIORIDADE ALTA (VAL018, VAL021, VAL022, VAL025)**
+
+### 18. Regime Tributário × CST/CSOSN (VAL018) ⭐⭐⭐ NOVO
+
+- **Severidade:** ERROR ❌
+- **Regra:** CRT (regime tributário) deve ser consistente com CST/CSOSN
+- **Campos:** `tax_regime`, `items[].cst`
+- **Sugestão:** "CRT 1/2 (Simples) must use CSOSN (101-900); CRT 3 (Normal) must use CST (00-90)"
+
+**Tabela de Regras:**
+
+| CRT | Regime            | CST/CSOSN Válido | Exemplo                     |
+| --- | ----------------- | ---------------- | --------------------------- |
+| 1   | Simples Nacional  | CSOSN 101-900    | CSOSN 101, 102, 201, 500 ✅ |
+| 2   | Simples (excesso) | CSOSN 101-900    | CSOSN 103, 300, 400 ✅      |
+| 3   | Regime Normal     | CST 00-90        | CST 00, 10, 40, 60 ✅       |
+
+**Exemplos de Erro:**
+
+```python
+❌ CRT=3 (Normal) + CSOSN 101 → VAL018 ERROR
+   Empresa no regime normal não pode usar CSOSN (exclusivo Simples)
+
+❌ CRT=1 (Simples) + CST 00 → VAL018 ERROR
+   Empresa do Simples Nacional deve usar CSOSN, não CST
+
+✅ CRT=3 (Normal) + CST 00 → OK
+✅ CRT=1 (Simples) + CSOSN 101 → OK
+```
+
+**Importância:** Evita erro fiscal grave - regime tributário errado pode gerar autuação.
+
+---
+
+### 19. Formato do NCM (VAL021) ⭐⭐ NOVO
+
+- **Severidade:** WARNING ⚠️
+- **Regra:** NCM deve ter exatamente 8 dígitos numéricos
+- **Campo:** `items[].ncm`
+- **Sugestão:** "NCM must be exactly 8 numeric digits - verify product classification"
+
+**Formato correto:**
+
+```python
+✅ "07032090" → Alho (NCM válido)
+✅ "10059090" → Milho (NCM válido)
+❌ "0703209"  → 7 dígitos (incompleto)
+❌ "070320901" → 9 dígitos (excesso)
+❌ "ABC12345" → Caracteres não numéricos
+```
+
+**Estrutura NCM:**
+
+- **Primeiros 6 dígitos:** Código internacional (SH - Sistema Harmonizado)
+- **Últimos 2 dígitos:** Especificação brasileira (TIPI)
+
+**Importância:** NCM incorreto pode gerar:
+
+- Alíquota de imposto errada
+- Problemas em auditorias fiscais
+- Dificuldade em classificação estatística
+
+---
+
+### 20. Alíquota ICMS Interestadual (VAL022) ⭐⭐ NOVO
+
+- **Severidade:** WARNING ⚠️
+- **Regra:** Alíquota ICMS deve ser plausível para operação interestadual
+- **Campos:** `issuer_uf`, `recipient_uf`, `items[].icms_rate`
+- **Sugestão:** "Verify ICMS rate for interstate operation (common rates: 4%, 7%, 12%)"
+
+**Alíquotas Interestaduais Comuns (2024):**
+
+| Origem            | Destino           | Alíquota ICMS |
+| ----------------- | ----------------- | ------------- |
+| Sul/Sudeste       | Norte/Nordeste/CO | 7%            |
+| Sul/Sudeste       | Sul/Sudeste       | 12%           |
+| Norte/Nordeste/CO | Qualquer          | 12%           |
+| Importados        | Qualquer          | 4%            |
+
+**Exemplos:**
+
+```python
+✅ SP → RJ + 12% → OK (Sul/Sudeste entre si)
+✅ SP → BA + 7% → OK (Sul/Sudeste para Nordeste)
+✅ SP → SP + 18% → OK (alíquota interna, mesma UF)
+⚠️ SP → RJ + 25% → VAL022 WARNING (alíquota incomum)
+```
+
+**Importância:** Alíquota interestadual errada é erro frequente que gera:
+
+- Diferencial de alíquota (DIFAL) incorreto
+- Problemas com partilha ICMS entre estados
+- Autuação fiscal
+
+---
+
+### 21. CFOP × UF Consistency (VAL025) ⭐⭐⭐ NOVO
+
+- **Severidade:** ERROR ❌
+- **Regra:** CFOP deve ser consistente com UF emitente/destinatário
+- **Campos:** `items[].cfop`, `issuer_uf`, `recipient_uf`
+- **Sugestão:** "CFOP 5xxx = within state (same UF); CFOP 6xxx = outside state (different UF)"
+
+**Tabela de Regras:**
+
+| CFOP | Operação              | Regra UF                      |
+| ---- | --------------------- | ----------------------------- |
+| 1xxx | Entrada dentro estado | Emitente UF = Destinatário UF |
+| 2xxx | Entrada fora estado   | Emitente UF ≠ Destinatário UF |
+| 5xxx | Saída dentro estado   | Emitente UF = Destinatário UF |
+| 6xxx | Saída fora estado     | Emitente UF ≠ Destinatário UF |
+| 3xxx | Transferência         | Sem regra específica          |
+
+**Exemplos de Validação:**
+
+```python
+✅ CFOP 5102 + RN→RN → OK (venda dentro estado)
+❌ CFOP 5102 + RN→SP → VAL025 ERROR (CFOP 5xxx exige mesma UF!)
+
+✅ CFOP 6101 + MA→DF → OK (venda fora estado)
+❌ CFOP 6101 + SP→SP → VAL025 ERROR (CFOP 6xxx exige UFs diferentes!)
+
+✅ CFOP 1102 + SP→SP → OK (compra dentro estado)
+✅ CFOP 2102 + RJ→SP → OK (compra fora estado)
+```
+
+**Importância:** Erro muito comum que causa:
+
+- Rejeição pela SEFAZ em alguns estados
+- Cálculo errado de impostos (alíquota interna vs interestadual)
+- Problemas em apuração de ICMS
+
+---
 
 ## Níveis de Severidade
 
@@ -455,24 +719,74 @@ issues = validator.validate(invoice)
 
 ### ✅ O que o sistema FAZ hoje:
 
-- **10 validações fiscais fundamentais**
-- **Sistema extensível** para adicionar regras
+- **21 validações fiscais** (10 básicas + 7 avançadas prioridade alta + 4 avançadas fase 2/3)
+  - **Básicas (VAL001-VAL010):** Formato, estrutura, cálculos simples
+  - **Avançadas Prioridade Alta (VAL011-VAL017):** Dígitos verificadores, CFOP×Operação, cálculos de impostos, duplicatas
+  - **Avançadas Fase 2/3 (VAL018, VAL021, VAL022, VAL025):** Regime tributário, NCM, ICMS interestadual, CFOP×UF
+- **Sistema extensível** para adicionar regras customizadas
 - **3 níveis de severidade** (ERROR, WARNING, INFO)
-- **Sugestões automáticas** de correção
+- **Sugestões automáticas** de correção para cada falha
 - **Reportagem completa** (UI, DB, Agent)
+- **Validações anti-fraude:** Dígito verificador, duplicatas, consistência CFOP
+- **Extração avançada de campos:** UF, CRT, CST, alíquotas ICMS, base de cálculo
+
+### ✨ NOVIDADES (Fase 2/3 implementada):
+
+#### **Parser Enhancements (Phase 2):**
+
+1. ✅ **Extração de UF:** Issuer/Recipient state
+2. ✅ **Extração de CRT:** Tax regime (Simples/Normal)
+3. ✅ **Extração de CST/CSOSN:** Situação tributária por item
+4. ✅ **Extração de alíquota ICMS:** pICMS por item
+5. ✅ **Extração de base ICMS:** vBC por item
+6. ✅ **Extração de desconto:** vDesc (documento)
+7. ✅ **Extração de outras despesas:** vOutro (documento)
+
+#### **Advanced Validations (Phase 3):**
+
+8. ✅ **VAL018:** Regime Tributário × CST/CSOSN
+   - CRT 1/2 (Simples) deve usar CSOSN (101-900)
+   - CRT 3 (Normal) deve usar CST (00-90)
+9. ✅ **VAL021:** Formato do NCM (8 dígitos)
+   - NCM deve ter exatamente 8 dígitos numéricos
+10. ✅ **VAL022:** Alíquota ICMS Interestadual
+    - Verifica alíquotas comuns (4%, 7%, 12%) para operações interestaduais
+11. ✅ **VAL025:** CFOP × UF Consistency
+    - CFOP 5xxx = mesma UF (dentro do estado)
+    - CFOP 6xxx = UFs diferentes (fora do estado)
+
+### ✨ NOVIDADES (Prioridade Alta - anteriormente implementada):
+
+1. ✅ **VAL011:** Validação de dígito verificador CNPJ/CPF
+2. ✅ **VAL012:** Validação de dígito verificador da chave de acesso (44º dígito)
+3. ✅ **VAL013:** Consistência CFOP × Tipo de Operação
+4. ✅ **VAL014-VAL016:** Validação de cálculos de impostos (ICMS, PIS, COFINS)
+5. ✅ **VAL017:** Detecção de duplicatas por chave de acesso
 
 ### ❌ O que NÃO faz (ainda):
 
-- **Validações específicas por indústria/setor**
-- Validação de CST/CSOSN avançada
-- Integração com tabelas SEFAZ (NCM, CFOP, municípios)
-- Validação de protocolo SEFAZ
+- Validações específicas por indústria/setor (farmacêutico, combustíveis, etc.)
+- Integração com tabelas SEFAZ oficiais completas (NCM-SH detalhado, CFOP completo, IBGE)
+- Validação de protocolo SEFAZ (consulta status NFe online)
+- Validação detalhada de substituição tributária (ST)
+- Análise de sequência de numeração (VAL020 - desconsiderado por uso de notas antigas)
+- Validação de prazo de emissão (VAL024 - desconsiderado por uso de notas antigas)
 
-### 🚀 Como Expandir:
+### 🚀 Roadmap - Próximas Validações:
 
-1. **Adicionar validações genéricas** (VAL011-VAL015)
-2. **Criar módulos por setor** (pharma, auto, agro, etc.)
-3. **Integrar tabelas oficiais** (NCM-SH, CFOP, IBGE)
-4. **Validação com SEFAZ** (consulta protocolo, status)
+#### **Prioridade MÉDIA:**
+
+- VAL019: Base de Cálculo ICMS ST (Substituição Tributária)
+- VAL023: Validação de Notas Referenciadas (devolução, complemento)
+- VAL026: Desconto × Acréscimo × Total
+
+#### **Prioridade BAIXA:**
+
+- VAL027: Peso × Quantidade (validação logística)
+- Validações setoriais (pharma, combustíveis, agro)
+- Machine Learning para detecção de anomalias de preço
+- Análise de sazonalidade e padrões suspeitos
+
+**NOTA:** VAL020 (sequência) e VAL024 (prazo) foram desconsiderados pois o sistema pode processar notas antigas/históricas, onde essas validações gerariam conflitos desnecessários.
 
 O sistema foi projetado para ser **facilmente extensível** - você pode adicionar novas regras sem modificar o código core, seguindo o padrão `ValidationRule`.

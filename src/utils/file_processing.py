@@ -27,14 +27,18 @@ class FileProcessor:
             auto_classify: Whether to automatically classify documents (default: True)
         """
         self.parser = XMLParserTool()
-        self.validator = FiscalValidatorTool()
-        self.classifier = DocumentClassifier() if auto_classify else None
         self.save_to_db = save_to_db
         self.auto_classify = auto_classify
         
         if save_to_db:
             self.db = DatabaseManager(database_url)
+            # Pass db_manager to validator for duplicate detection
+            self.validator = FiscalValidatorTool(db_manager=self.db)
             logger.info("FileProcessor initialized with database integration")
+        else:
+            self.validator = FiscalValidatorTool()
+        
+        self.classifier = DocumentClassifier() if auto_classify else None
         
         if auto_classify:
             logger.info("FileProcessor initialized with automatic classification enabled")
