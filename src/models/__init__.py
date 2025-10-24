@@ -72,6 +72,12 @@ class InvoiceItem(BaseModel):
     unit_price: Decimal = Field(..., description="Unit price")
     total_price: Decimal = Field(..., description="Total item price")
     taxes: TaxDetails = Field(default_factory=TaxDetails, description="Tax breakdown")
+    
+    # Advanced fiscal fields (VAL018, VAL022)
+    cst: str | None = Field(None, description="CST/CSOSN - Código de Situação Tributária")
+    icms_origin: str | None = Field(None, description="Origem da mercadoria (0-8)")
+    icms_rate: Decimal | None = Field(None, description="Alíquota de ICMS aplicada (%)")
+    icms_base: Decimal | None = Field(None, description="Base de cálculo do ICMS")
 
     @field_validator("quantity", "unit_price", "total_price", mode="before")
     @classmethod
@@ -103,11 +109,20 @@ class InvoiceModel(BaseModel):
         None, description="Recipient CNPJ/CPF (redacted in logs by default)"
     )
     recipient_name: str | None = Field(None, description="Recipient name")
+    
+    # Geographic data (VAL022, VAL025)
+    issuer_uf: str | None = Field(None, description="Issuer state (UF)")
+    recipient_uf: str | None = Field(None, description="Recipient state (UF)")
+    
+    # Fiscal regime (VAL018)
+    tax_regime: str | None = Field(None, description="Tax regime (CRT): 1=Simples, 2=Simples excesso, 3=Normal")
 
     # Financial totals
     total_products: Decimal = Field(..., description="Total value of products/services")
     total_taxes: Decimal = Field(..., description="Total tax value")
     total_invoice: Decimal = Field(..., description="Total invoice value")
+    discount: Decimal = Field(default=Decimal("0"), description="Total discount (vDesc)")
+    other_expenses: Decimal = Field(default=Decimal("0"), description="Other expenses (vOutro)")
 
     # Items
     items: list[InvoiceItem] = Field(default_factory=list, description="Invoice items")
@@ -139,12 +154,12 @@ class InvoiceModel(BaseModel):
 class ClassificationResult(BaseModel):
     """Result of document classification."""
 
+    operation_type: str = Field(..., description="Operation type (purchase/sale/transfer/return)")
     cost_center: str = Field(..., description="Assigned cost center")
-    category: str = Field(..., description="Assigned category")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score [0, 1]")
     reasoning: str | None = Field(None, description="Explanation of classification")
-    fallback_used: bool = Field(
-        default=False, description="Whether deterministic fallback was used"
+    used_llm_fallback: bool = Field(
+        default=False, description="Whether LLM fallback was used"
     )
 
     model_config = ConfigDict(use_enum_values=True)

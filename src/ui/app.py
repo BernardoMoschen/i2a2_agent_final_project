@@ -13,6 +13,7 @@ import streamlit as st
 from src.agent.agent_core import create_agent
 from src.utils.file_processing import (
     FileProcessor,
+    format_classification,
     format_invoice_summary,
     format_items_table,
     format_validation_issues,
@@ -145,10 +146,17 @@ def main() -> None:
                 st.divider()
                 st.subheader("📋 Processing Results")
 
-                for filename, invoice, issues in all_results:
+                for result in all_results:
+                    filename, invoice, issues = result[0], result[1], result[2]
+                    classification = result[3] if len(result) > 3 else None
+                    
                     with st.expander(f"📄 {filename} - {invoice.document_type} {invoice.document_number}", expanded=True):
                         # Summary
                         st.markdown(format_invoice_summary(invoice))
+
+                        # Classification
+                        st.markdown("#### 🏷️ Classificação")
+                        st.markdown(format_classification(classification))
 
                         # Validation
                         st.markdown("#### ✅ Validação")
@@ -171,9 +179,14 @@ def main() -> None:
                     f"View all {len(st.session_state.processed_documents)} documents in the **History** tab."
                 )
 
-                for filename, invoice, issues in recent_docs:
+                for result in recent_docs:
+                    filename, invoice, issues = result[0], result[1], result[2]
+                    classification = result[3] if len(result) > 3 else None
+                    
                     with st.expander(f"📄 {filename} - {invoice.document_type} {invoice.document_number}"):
                         st.markdown(format_invoice_summary(invoice))
+                        st.markdown("#### 🏷️ Classificação")
+                        st.markdown(format_classification(classification))
                         st.markdown("#### ✅ Validação")
                         st.markdown(format_validation_issues(issues))
                         st.markdown("#### 🛒 Itens")
@@ -197,7 +210,7 @@ def main() -> None:
 
         # Filters section
         st.subheader("🔍 Filters")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             filter_type = st.selectbox(
@@ -207,13 +220,20 @@ def main() -> None:
             )
 
         with col2:
+            filter_operation = st.selectbox(
+                "Operation Type",
+                options=["All", "Purchase", "Sale", "Transfer", "Return"],
+                key="history_filter_operation"
+            )
+
+        with col3:
             filter_cnpj = st.text_input(
                 "Issuer CNPJ (contains)",
                 placeholder="00.000.000/0000-00",
                 key="history_filter_cnpj"
             )
 
-        with col3:
+        with col4:
             # Date filter with presets
             date_preset = st.selectbox(
                 "Date Range",
@@ -265,6 +285,9 @@ def main() -> None:
             db_filters["invoice_type"] = filter_type
         if filter_cnpj:
             db_filters["issuer_cnpj"] = filter_cnpj
+        if filter_operation != "All":
+            # Convert UI label to database value (lowercase)
+            db_filters["operation_type"] = filter_operation.lower()
         
         # Handle date filtering based on preset
         if date_preset == "All Time":
@@ -333,11 +356,23 @@ def main() -> None:
             df_data = []
             for inv in invoices:
                 total_invoice = float(inv.total_invoice) if inv.total_invoice else 0.0
+                
+                # Operation type emoji
+                operation_emoji = {
+                    "purchase": "📥",
+                    "sale": "📤",
+                    "transfer": "🔄",
+                    "return": "↩️",
+                }.get(inv.operation_type, "📄") if inv.operation_type else "❓"
+                
+                operation_display = f"{operation_emoji} {inv.operation_type.title()}" if inv.operation_type else "Not classified"
+                
                 df_data.append({
                     "Date": inv.issue_date.strftime("%Y-%m-%d %H:%M") if inv.issue_date else "N/A",
                     "Type": inv.document_type,
+                    "Operation": operation_display,
                     "Number": inv.document_number,
-                    "Issuer": inv.issuer_name[:30] + "..." if len(inv.issuer_name) > 30 else inv.issuer_name,
+                    "Issuer": inv.issuer_name[:25] + "..." if len(inv.issuer_name) > 25 else inv.issuer_name,
                     "CNPJ": inv.issuer_cnpj,
                     "Total": f"R$ {total_invoice:,.2f}",
                     "Items": len(inv.items) if inv.items else 0,
@@ -381,6 +416,18 @@ def main() -> None:
 - **Total:** R$ {total_invoice:,.2f}  
 """
                     st.markdown(summary_md)
+
+                    # Classification (if available)
+                    if inv.operation_type or inv.cost_center:
+                        st.markdown("#### 🏷️ Classificação")
+                        classification_dict = {
+                            "operation_type": inv.operation_type,
+                            "cost_center": inv.cost_center,
+                            "confidence": inv.classification_confidence,
+                            "reasoning": inv.classification_reasoning,
+                            "used_llm_fallback": inv.used_llm_fallback,
+                        }
+                        st.markdown(format_classification(classification_dict))
 
                     # Items
                     if inv.items:

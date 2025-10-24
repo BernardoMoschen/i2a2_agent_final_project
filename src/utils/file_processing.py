@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 
 from src.database.db import DatabaseManager
 from src.models import InvoiceModel
+from src.services.classifier import DocumentClassifier
 from src.tools.fiscal_validator import FiscalValidatorTool
 from src.tools.xml_parser import XMLParserTool
 
@@ -16,21 +17,31 @@ logger = logging.getLogger(__name__)
 class FileProcessor:
     """Process uploaded XML and ZIP files."""
 
-    def __init__(self, database_url: str = "sqlite:///fiscal_documents.db", save_to_db: bool = True):
+    def __init__(self, database_url: str = "sqlite:///fiscal_documents.db", save_to_db: bool = True, auto_classify: bool = True):
         """
-        Initialize processor with parser and validator.
+        Initialize processor with parser, validator, and classifier.
         
         Args:
             database_url: SQLite database URL
             save_to_db: Whether to automatically save to database (default: True)
+            auto_classify: Whether to automatically classify documents (default: True)
         """
         self.parser = XMLParserTool()
-        self.validator = FiscalValidatorTool()
         self.save_to_db = save_to_db
+        self.auto_classify = auto_classify
         
         if save_to_db:
             self.db = DatabaseManager(database_url)
+            # Pass db_manager to validator for duplicate detection
+            self.validator = FiscalValidatorTool(db_manager=self.db)
             logger.info("FileProcessor initialized with database integration")
+        else:
+            self.validator = FiscalValidatorTool()
+        
+        self.classifier = DocumentClassifier() if auto_classify else None
+        
+        if auto_classify:
+            logger.info("FileProcessor initialized with automatic classification enabled")
 
     def process_file(self, file_content: bytes, filename: str) -> List[Tuple[str, InvoiceModel, List]]:
         """
@@ -86,36 +97,53 @@ class FileProcessor:
 
         return results
 
-    def _process_xml(self, xml_content: bytes, filename: str) -> Tuple[str, InvoiceModel, List] | None:
+    def _process_xml(self, xml_content: bytes, filename: str) -> Tuple[str, InvoiceModel, List, Optional[dict]] | None:
         """
-        Parse and validate a single XML file.
+        Parse, validate, and classify a single XML file.
 
         Args:
             xml_content: XML file bytes
             filename: Name of the file
 
         Returns:
-            Tuple of (filename, invoice, issues) or None if parsing failed
+            Tuple of (filename, invoice, issues, classification) or None if parsing failed
         """
         try:
-            # Parse XML
+            # Step 1: Parse XML
             invoice = self.parser.parse(xml_content)
 
-            # Validate
+            # Step 2: Validate
             issues = self.validator.validate(invoice)
+
+            # Step 3: Classify (if enabled)
+            classification_result = None
+            if self.auto_classify and self.classifier:
+                try:
+                    classification = self.classifier.classify(invoice)
+                    classification_result = {
+                        "operation_type": classification.operation_type,
+                        "cost_center": classification.cost_center,
+                        "confidence": classification.confidence,
+                        "reasoning": classification.reasoning,
+                        "used_llm_fallback": classification.used_llm_fallback
+                    }
+                    logger.info(f"Classified {invoice.document_key}: {classification.operation_type} → {classification.cost_center} (confidence: {classification.confidence:.0%})")
+                except Exception as e:
+                    logger.error(f"Classification failed for {filename}: {e}", exc_info=True)
+                    # Continue even if classification fails
 
             logger.info(f"Processed {filename}: {invoice.document_type} {invoice.document_key}")
 
-            # Save to database if enabled
+            # Step 4: Save to database if enabled
             if self.save_to_db:
                 try:
-                    self.db.save_invoice(invoice, issues)
+                    self.db.save_invoice(invoice, issues, classification_result)
                     logger.info(f"Saved {invoice.document_key} to database")
                 except Exception as e:
                     logger.error(f"Failed to save to database: {e}")
                     # Continue even if DB save fails
 
-            return (filename, invoice, issues)
+            return (filename, invoice, issues, classification_result)
 
         except Exception as e:
             logger.error(f"Error processing {filename}: {e}", exc_info=True)
@@ -230,5 +258,58 @@ def format_validation_issues(issues: List) -> str:
         result += "### ℹ️ Informações\n"
         for issue in infos:
             result += f"- **{issue.code}**: {issue.message}\n"
+
+    return result
+
+
+def format_classification(classification: Optional[dict]) -> str:
+    """
+    Format classification results into a readable report.
+
+    Args:
+        classification: Dict with classification results or None
+
+    Returns:
+        Formatted string with classification details
+    """
+    if not classification:
+        return "ℹ️ _Classificação não disponível para este documento._"
+
+    operation_type = classification.get("operation_type", "Desconhecido")
+    cost_center = classification.get("cost_center", "Não classificado")
+    confidence = classification.get("confidence", 0)
+    reasoning = classification.get("reasoning", "")
+    used_llm = classification.get("used_llm_fallback", False)
+
+    # Confidence badge
+    if confidence >= 0.8:
+        confidence_badge = "🟢 Alta"
+        confidence_color = "green"
+    elif confidence >= 0.6:
+        confidence_badge = "🟡 Média"
+        confidence_color = "orange"
+    else:
+        confidence_badge = "🔴 Baixa"
+        confidence_color = "red"
+
+    # Operation type emoji
+    operation_emoji = {
+        "purchase": "📥",
+        "sale": "📤",
+        "transfer": "🔄",
+        "return": "↩️",
+    }.get(operation_type.lower(), "📄")
+
+    result = f"""
+**Tipo de Operação:** {operation_emoji} {operation_type.title()}  
+**Centro de Custo:** 🏢 {cost_center}  
+**Confiança:** {confidence_badge} ({confidence:.0%})  
+"""
+
+    if reasoning:
+        result += f"\n💡 **Justificativa:** {reasoning}"
+
+    if used_llm:
+        result += "\n\n🤖 _Classificação feita com auxílio de IA (LLM fallback)_"
 
     return result

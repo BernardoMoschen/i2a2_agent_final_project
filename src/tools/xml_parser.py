@@ -108,6 +108,17 @@ class XMLParserTool:
 
         issuer_cnpj = self._get_text(emit, "CNPJ")
         issuer_name = self._get_text(emit, "xNome")
+        
+        # Extract tax regime (CRT) - NEW
+        tax_regime = self._get_text(emit, "CRT")
+        
+        # Extract issuer UF - NEW
+        issuer_uf = self._get_text(emit, "UF")
+        if not issuer_uf:
+            # Try enderEmit/UF
+            ender_emit = emit.find(".//enderEmit", self.NAMESPACES) or emit.find(".//nfe:enderEmit", self.NAMESPACES)
+            if ender_emit is not None:
+                issuer_uf = self._get_text(ender_emit, "UF")
 
         # Dest section (recipient) - optional for NFCe
         dest = inf_nfe.find(".//dest", self.NAMESPACES) or inf_nfe.find(
@@ -115,9 +126,18 @@ class XMLParserTool:
         )
         recipient_cnpj_cpf = None
         recipient_name = None
+        recipient_uf = None
         if dest is not None:
             recipient_cnpj_cpf = self._get_text(dest, "CNPJ") or self._get_text(dest, "CPF")
             recipient_name = self._get_text(dest, "xNome")
+            
+            # Extract recipient UF - NEW
+            recipient_uf = self._get_text(dest, "UF")
+            if not recipient_uf:
+                # Try enderDest/UF
+                ender_dest = dest.find(".//enderDest", self.NAMESPACES) or dest.find(".//nfe:enderDest", self.NAMESPACES)
+                if ender_dest is not None:
+                    recipient_uf = self._get_text(ender_dest, "UF")
 
         # Total section
         total = inf_nfe.find(".//total/ICMSTot", self.NAMESPACES) or inf_nfe.find(
@@ -128,6 +148,10 @@ class XMLParserTool:
 
         total_products = Decimal(self._get_text(total, "vProd") or "0")
         total_invoice = Decimal(self._get_text(total, "vNF") or "0")
+        
+        # Extract discount and other expenses - NEW
+        discount = Decimal(self._get_text(total, "vDesc") or "0")
+        other_expenses = Decimal(self._get_text(total, "vOutro") or "0")
 
         # Calculate total taxes
         icms_total = Decimal(self._get_text(total, "vICMS") or "0")
@@ -157,9 +181,14 @@ class XMLParserTool:
             issuer_name=issuer_name,
             recipient_cnpj_cpf=recipient_cnpj_cpf,
             recipient_name=recipient_name,
+            issuer_uf=issuer_uf,
+            recipient_uf=recipient_uf,
+            tax_regime=tax_regime,
             total_products=total_products,
             total_taxes=total_taxes,
             total_invoice=total_invoice,
+            discount=discount,
+            other_expenses=other_expenses,
             items=items,
             taxes=taxes,
             raw_xml=xml_content,
@@ -191,13 +220,39 @@ class XMLParserTool:
                 ".//nfe:imposto", self.NAMESPACES
             )
             item_taxes = TaxDetails()
+            cst = None
+            icms_origin = None
+            icms_rate = None
+            icms_base = None
+            
             if imposto is not None:
                 icms = imposto.find(".//ICMS", self.NAMESPACES) or imposto.find(
                     ".//nfe:ICMS", self.NAMESPACES
                 )
                 if icms is not None:
-                    # ICMS can have multiple variants (ICMS00, ICMS10, etc.)
+                    # ICMS can have multiple variants (ICMS00, ICMS10, ICMS40, etc.)
                     for child in icms:
+                        # Extract CST or CSOSN - NEW
+                        cst_val = self._get_text(child, "CST") or self._get_text(child, "CSOSN")
+                        if cst_val:
+                            cst = cst_val
+                        
+                        # Extract origin - NEW
+                        orig_val = self._get_text(child, "orig")
+                        if orig_val:
+                            icms_origin = orig_val
+                        
+                        # Extract ICMS rate - NEW
+                        rate_val = self._get_text(child, "pICMS")
+                        if rate_val:
+                            icms_rate = Decimal(rate_val)
+                        
+                        # Extract ICMS base - NEW
+                        base_val = self._get_text(child, "vBC")
+                        if base_val:
+                            icms_base = Decimal(base_val)
+                        
+                        # Extract ICMS value
                         icms_val = self._get_text(child, "vICMS")
                         if icms_val:
                             item_taxes.icms = Decimal(icms_val)
@@ -243,6 +298,10 @@ class XMLParserTool:
                     unit_price=unit_price,
                     total_price=total_price,
                     taxes=item_taxes,
+                    cst=cst,
+                    icms_origin=icms_origin,
+                    icms_rate=icms_rate,
+                    icms_base=icms_base,
                 )
             )
 
