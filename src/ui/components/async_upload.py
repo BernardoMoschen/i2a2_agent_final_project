@@ -9,7 +9,9 @@ from datetime import datetime
 
 import streamlit as st
 
+from src.database.db import DatabaseManager
 from src.ui.async_processor import AsyncProcessor
+from src.ui.components.cache_stats import render_cache_stats
 from src.utils.file_processing import format_classification, format_validation_issues
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,14 @@ def render_async_upload_tab():
     """Render async upload tab with real-time progress and auto-tuned parallelism."""
 
     st.header("⚡ Upload de Documentos Fiscais")
+    
+    # Show cache statistics
+    try:
+        db = DatabaseManager()
+        render_cache_stats(db)
+    except Exception as e:
+        logger.error(f"Error loading cache stats: {e}")
+
 
     # File uploader
     uploaded_files = st.file_uploader(

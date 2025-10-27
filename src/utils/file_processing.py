@@ -36,12 +36,14 @@ class FileProcessor:
             self.validator = FiscalValidatorTool(db_manager=self.db)
             logger.info("FileProcessor initialized with database integration")
         else:
+            self.db = None
             self.validator = FiscalValidatorTool()
         
-        self.classifier = DocumentClassifier() if auto_classify else None
+        # Pass database to classifier for caching support
+        self.classifier = DocumentClassifier(database_manager=self.db) if auto_classify else None
         
         if auto_classify:
-            logger.info("FileProcessor initialized with automatic classification enabled")
+            logger.info("FileProcessor initialized with automatic classification and caching enabled")
 
     def process_file(self, file_content: bytes, filename: str) -> List[Tuple[str, InvoiceModel, List]]:
         """
