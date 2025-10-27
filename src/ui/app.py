@@ -12,13 +12,7 @@ sys.path.insert(0, str(project_root))
 import streamlit as st
 
 from src.agent.agent_core import create_agent
-from src.utils.file_processing import (
-    FileProcessor,
-    format_classification,
-    format_invoice_summary,
-    format_items_table,
-    format_validation_issues,
-)
+from src.utils.file_processing import format_classification
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -97,146 +91,13 @@ def main() -> None:
 
     # Main content area
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📤 Upload", "📋 History", "💬 Chat", "📊 Validation", "📈 Reports"]
+        ["⚡ Upload", "📋 History", "💬 Chat", "📊 Validation", "📈 Reports"]
     )
 
     with tab1:
-        st.header("Upload Fiscal Documents")
-        st.markdown("Upload single XML files or ZIP archives containing multiple documents.")
-
-        uploaded_files = st.file_uploader(
-            "Choose XML or ZIP files",
-            type=["xml", "zip"],
-            accept_multiple_files=True,
-        )
-
-        if uploaded_files:
-            st.success(f"✅ {len(uploaded_files)} file(s) uploaded")
-
-            # Process button
-            if st.button("🔍 Process All Files", type="primary", use_container_width=True):
-                processor = FileProcessor()
-
-                # Initialize progress tracking
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                stats_container = st.container()
-
-                all_results = []
-                total_files = len(uploaded_files)
-                processed_count = 0
-                error_count = 0
-                
-                # Estimate processing time (rough estimate: 2 seconds per file)
-                estimated_time = total_files * 2
-                start_time = datetime.now()
-
-                # Process each file
-                for idx, uploaded_file in enumerate(uploaded_files):
-                    # Update status with file name and progress
-                    status_text.markdown(
-                        f"🔄 **Processing:** `{uploaded_file.name}` "
-                        f"({idx + 1}/{total_files})"
-                    )
-
-                    try:
-                        # Read file content
-                        file_content = uploaded_file.read()
-
-                        # Process file
-                        results = processor.process_file(file_content, uploaded_file.name)
-                        all_results.extend(results)
-                        processed_count += len(results)
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing {uploaded_file.name}: {e}", exc_info=True)
-                        error_count += 1
-                        # Show error but continue processing
-                        status_text.error(f"❌ Error in {uploaded_file.name}: {str(e)}")
-
-                    # Update progress bar
-                    progress = (idx + 1) / total_files
-                    progress_bar.progress(progress)
-                    
-                    # Calculate and display estimated time remaining
-                    elapsed_time = (datetime.now() - start_time).total_seconds()
-                    if idx > 0:
-                        avg_time_per_file = elapsed_time / (idx + 1)
-                        remaining_files = total_files - (idx + 1)
-                        estimated_remaining = remaining_files * avg_time_per_file
-                        
-                        with stats_container:
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                st.metric("Processed", f"{idx + 1}/{total_files}")
-                            with col2:
-                                st.metric("Documents", processed_count)
-                            with col3:
-                                st.metric("Errors", error_count)
-                            with col4:
-                                st.metric("ETA", f"{int(estimated_remaining)}s")
-
-                # Final status
-                elapsed = (datetime.now() - start_time).total_seconds()
-                status_text.success(
-                    f"✅ **Processing Complete!** "
-                    f"{processed_count} document(s) from {total_files} file(s) in {elapsed:.1f}s "
-                    f"({error_count} errors)"
-                )
-                progress_bar.empty()
-
-                # Store results in session state
-                st.session_state.processed_documents = all_results
-
-                # Display results
-                st.divider()
-                st.subheader("📋 Processing Results")
-
-                for result in all_results:
-                    filename, invoice, issues = result[0], result[1], result[2]
-                    classification = result[3] if len(result) > 3 else None
-                    
-                    with st.expander(f"📄 {filename} - {invoice.document_type} {invoice.document_number}", expanded=True):
-                        # Summary
-                        st.markdown(format_invoice_summary(invoice))
-
-                        # Classification
-                        st.markdown("#### 🏷️ Classificação")
-                        st.markdown(format_classification(classification))
-
-                        # Validation
-                        st.markdown("#### ✅ Validação")
-                        st.markdown(format_validation_issues(issues))
-
-                        # Items table
-                        st.markdown("#### 🛒 Itens do Documento")
-                        st.markdown(format_items_table(invoice))
-
-            # Display previously processed documents
-            elif "processed_documents" in st.session_state and st.session_state.processed_documents:
-                st.divider()
-                st.subheader("📋 Recently Processed Documents")
-                
-                # Show only last 10 documents from current session
-                recent_docs = st.session_state.processed_documents[-10:]
-                
-                st.info(
-                    f"ℹ️ Showing {len(recent_docs)} most recent documents from this session. "
-                    f"View all {len(st.session_state.processed_documents)} documents in the **History** tab."
-                )
-
-                for result in recent_docs:
-                    filename, invoice, issues = result[0], result[1], result[2]
-                    classification = result[3] if len(result) > 3 else None
-                    
-                    with st.expander(f"📄 {filename} - {invoice.document_type} {invoice.document_number}"):
-                        st.markdown(format_invoice_summary(invoice))
-                        st.markdown("#### 🏷️ Classificação")
-                        st.markdown(format_classification(classification))
-                        st.markdown("#### ✅ Validação")
-                        st.markdown(format_validation_issues(issues))
-                        st.markdown("#### 🛒 Itens")
-                        st.markdown(format_items_table(invoice))
+        # Async Upload Tab
+        from src.ui.components.async_upload import render_async_upload_tab
+        render_async_upload_tab()
 
     with tab2:
         st.header("📋 Document History")
