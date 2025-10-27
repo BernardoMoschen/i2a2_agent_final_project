@@ -8,11 +8,11 @@ O agente agora funciona como **ChatGPT/Claude** mas com **ferramentas fiscais es
 
 ## 🎯 3 Níveis de Capacidade
 
-| Tier | O que faz | Quando usar | Exemplo |
-|------|-----------|-------------|---------|
-| **1️⃣ Inteligência Nativa** | Responde do conhecimento do modelo | Perguntas conceituais | "O que é ICMS?" |
-| **2️⃣ Tools Especializadas** | Acessa banco de dados | Consultas aos dados | "Quantas notas temos?" |
-| **3️⃣ Capacidades Dinâmicas** | Executa Python, busca web | Cálculos complexos | "Calcule juros compostos" |
+| Tier                         | O que faz                          | Quando usar           | Exemplo                   |
+| ---------------------------- | ---------------------------------- | --------------------- | ------------------------- |
+| **1️⃣ Inteligência Nativa**   | Responde do conhecimento do modelo | Perguntas conceituais | "O que é ICMS?"           |
+| **2️⃣ Tools Especializadas**  | Acessa banco de dados              | Consultas aos dados   | "Quantas notas temos?"    |
+| **3️⃣ Capacidades Dinâmicas** | Executa Python, busca web          | Cálculos complexos    | "Calcule juros compostos" |
 
 ---
 
@@ -150,12 +150,14 @@ agent = create_agent(
 ### Execução Python
 
 **✅ Pode:**
+
 - Cálculos matemáticos
 - Parsing JSON/CSV
 - Estatísticas (pandas/numpy)
 - String manipulation
 
 **❌ Não Pode:**
+
 - Acessar arquivos do disco
 - Requests de rede
 - Subprocess

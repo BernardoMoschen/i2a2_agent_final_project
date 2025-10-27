@@ -15,6 +15,7 @@ O **Hybrid Fiscal Agent** é um agente LLM avançado que combina três níveis d
 ### Problema que Resolvemos
 
 **Antes (Agent Limitado):**
+
 ```
 User: "O que é ICMS?"
 Agent: ❌ "Não tenho ferramenta para isso"
@@ -27,6 +28,7 @@ Agent: ❌ "Não gero código"
 ```
 
 **Agora (Hybrid Agent):**
+
 ```
 User: "O que é ICMS?"
 Agent: ✅ "ICMS é o Imposto sobre Circulação de Mercadorias e Serviços..." (explica diretamente)
@@ -377,12 +379,14 @@ print(capabilities)
 ### 1. Deixe o Agente Decidir
 
 ❌ **Não force o uso de tools:**
+
 ```python
 # Ruim
 "Use a ferramenta search_invoices_database para mostrar quantas notas temos"
 ```
 
 ✅ **Deixe o agente escolher:**
+
 ```python
 # Bom
 "Quantas notas fiscais temos?"
@@ -392,11 +396,13 @@ print(capabilities)
 ### 2. Seja Natural
 
 ❌ **Não use comandos técnicos:**
+
 ```python
 "Execute SQL: SELECT COUNT(*) FROM invoices"
 ```
 
 ✅ **Pergunte naturalmente:**
+
 ```python
 "Quantos documentos existem no banco?"
 ```
@@ -406,11 +412,13 @@ print(capabilities)
 Para conceitos, **não peça relatórios**:
 
 ❌ **Ruim:**
+
 ```python
 "Gere relatório explicando o que é ICMS"
 ```
 
 ✅ **Bom:**
+
 ```python
 "O que é ICMS?"
 # → Responde diretamente (mais rápido)
@@ -419,6 +427,7 @@ Para conceitos, **não peça relatórios**:
 ### 4. Combine Capacidades
 
 ✅ **Aproveite o híbrido:**
+
 ```python
 "Explique o que é depreciação e calcule para um ativo de R$ 50.000 em 10 anos"
 # → Explica (Tier 1) + Calcula (Tier 3)
@@ -431,6 +440,7 @@ Para conceitos, **não peça relatórios**:
 ### Execução de Código Python
 
 **O que PODE fazer:**
+
 - ✅ Cálculos matemáticos
 - ✅ Manipulação de strings
 - ✅ Parsing de JSON/CSV (em memória)
@@ -438,6 +448,7 @@ Para conceitos, **não peça relatórios**:
 - ✅ pandas, numpy (se instalados)
 
 **O que NÃO PODE fazer:**
+
 - ❌ Acessar arquivos do sistema
 - ❌ Fazer requisições de rede
 - ❌ Executar subprocess
@@ -454,17 +465,17 @@ Para conceitos, **não peça relatórios**:
 
 ## 📊 Comparação: Antigo vs Híbrido
 
-| Capacidade | Agente Antigo | Hybrid Agent |
-|-----------|---------------|--------------|
+| Capacidade             | Agente Antigo       | Hybrid Agent           |
+| ---------------------- | ------------------- | ---------------------- |
 | **Explicar conceitos** | ❌ "Não tenho tool" | ✅ Explica diretamente |
-| **Calcular** | ❌ Limitado | ✅ Cálculos complexos |
-| **Gerar código** | ❌ Não | ✅ Python completo |
-| **Buscar BD** | ✅ Sim | ✅ Sim |
-| **Gerar relatórios** | ✅ Sim | ✅ Sim |
-| **Validar docs** | ✅ Sim | ✅ Sim |
-| **Busca web** | ❌ Não | ✅ Sim (opcional) |
-| **Exec Python** | ❌ Não | ✅ Sim |
-| **Encadear tools** | ⚠️ Limitado | ✅ Ilimitado |
+| **Calcular**           | ❌ Limitado         | ✅ Cálculos complexos  |
+| **Gerar código**       | ❌ Não              | ✅ Python completo     |
+| **Buscar BD**          | ✅ Sim              | ✅ Sim                 |
+| **Gerar relatórios**   | ✅ Sim              | ✅ Sim                 |
+| **Validar docs**       | ✅ Sim              | ✅ Sim                 |
+| **Busca web**          | ❌ Não              | ✅ Sim (opcional)      |
+| **Exec Python**        | ❌ Não              | ✅ Sim                 |
+| **Encadear tools**     | ⚠️ Limitado         | ✅ Ilimitado           |
 
 ---
 
