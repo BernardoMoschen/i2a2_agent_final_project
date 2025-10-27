@@ -622,6 +622,94 @@ def main() -> None:
             logger.error(f"Error loading statistics: {e}")
             st.error("Error loading statistics")
 
+    with tab6:
+        st.header("📊 System Statistics")
+        
+        # Cache statistics
+        from src.database.db import DatabaseManager
+        from src.ui.components.cache_stats import render_cache_stats
+        
+        try:
+            db = DatabaseManager()
+            
+            st.subheader("🎯 Classification Cache")
+            st.markdown("Intelligent system that reduces LLM costs by reusing classifications from similar documents.")
+            
+            # Render cache stats (expanded by default in this tab)
+            stats = db.get_cache_statistics()
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "🗄️ Cache Entries",
+                    stats["total_entries"],
+                    help="Unique classifications stored"
+                )
+            
+            with col2:
+                st.metric(
+                    "🎯 Cache Hits",
+                    stats["total_hits"],
+                    help="Times cache was used instead of calling LLM"
+                )
+            
+            with col3:
+                st.metric(
+                    "📈 Effectiveness",
+                    f"{stats['cache_effectiveness']:.1f}%",
+                    help="Percentage of classifications that came from cache"
+                )
+            
+            with col4:
+                avg_hits = stats["avg_hits_per_entry"]
+                cost_saved = stats["total_hits"] * 0.001  # Assuming $0.001 per LLM call
+                st.metric(
+                    "💰 Estimated Savings",
+                    f"${cost_saved:.2f}",
+                    help=f"Savings on LLM calls (avg {avg_hits:.1f} hits/entry)"
+                )
+            
+            if stats["total_entries"] > 0:
+                st.success(
+                    f"✅ Cache working! {stats['total_hits']} classifications "
+                    f"reused from {stats['total_entries']} saved patterns."
+                )
+            else:
+                st.info("💡 No classifications in cache yet. Process some documents to populate the cache.")
+            
+            st.divider()
+            
+            # Database statistics
+            st.subheader("💾 Database Statistics")
+            db_stats = db.get_statistics()
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("📄 Total Documents", db_stats["total_invoices"])
+            
+            with col2:
+                st.metric("🛒 Total Items", db_stats["total_items"])
+            
+            with col3:
+                st.metric("⚠️ Validation Issues", db_stats["total_issues"])
+            
+            # Documents by type
+            if db_stats["by_type"]:
+                st.markdown("#### 📊 Documents by Type")
+                type_df = {
+                    "Type": list(db_stats["by_type"].keys()),
+                    "Count": list(db_stats["by_type"].values())
+                }
+                st.bar_chart(type_df, x="Type", y="Count")
+            
+            st.metric("💵 Total Value Processed", f"R$ {db_stats['total_value']:,.2f}")
+                
+        except Exception as e:
+            logger.error(f"Error loading statistics: {e}")
+            st.error("Error loading statistics")
+
 
 if __name__ == "__main__":
     main()
