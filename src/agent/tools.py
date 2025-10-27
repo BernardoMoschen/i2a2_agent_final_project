@@ -469,12 +469,20 @@ database_stats_tool = DatabaseStatsTool()
 from src.agent.business_tools import ALL_BUSINESS_TOOLS
 from src.agent.archiver_tools import ALL_ARCHIVER_TOOLS
 
-# List of all tools
+# Import report generation tool
+from .report_tool import FiscalReportExportTool
+fiscal_report_export_tool = FiscalReportExportTool()
+
+# All tools list
 ALL_TOOLS = [
     parse_xml_tool,
     validate_invoice_tool,
     fiscal_knowledge_tool,
     database_search_tool,
     database_stats_tool,
-] + ALL_BUSINESS_TOOLS + ALL_ARCHIVER_TOOLS
+    fiscal_report_export_tool,  # CSV/XLSX file export for download
+    *ALL_BUSINESS_TOOLS,  # Includes 'generate_report' for interactive charts
+    *ALL_ARCHIVER_TOOLS,
+]
+
 

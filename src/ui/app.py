@@ -525,29 +525,14 @@ def main() -> None:
             )
 
     with tab5:
-        st.header("Reports & Visualizations")
-        st.markdown("Generate reports and visualize your fiscal data.")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("📊 Report Generation")
-            st.selectbox("Report Type", ["Summary", "Detailed", "Tax Analysis"])
-            st.date_input("Date Range", value=[])
-
-            if st.button("📥 Generate Report", type="primary"):
-                st.info("Report generation coming soon...")
-
-        with col2:
-            st.subheader("📈 Quick Stats")
-            st.metric("Documents Processed", "0")
-            st.metric("Total Value", "R$ 0,00")
-            st.metric("Validation Pass Rate", "-%")
-
-        st.divider()
-
-        st.subheader("📉 Placeholder Visualization")
-        st.info("Charts and graphs will appear here once documents are processed.")
+        # Reports Tab with full reporting functionality
+        from src.ui.components.reports_tab import render_reports_tab
+        
+        # Convert file path to SQLite URL
+        database_url = f"sqlite:///{db_path}"
+        db_reports = DatabaseManager(database_url=database_url)
+        
+        render_reports_tab(db_reports)
 
     with tab6:
         st.header("📊 System Statistics")
