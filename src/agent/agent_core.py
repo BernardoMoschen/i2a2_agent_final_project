@@ -1,104 +1,98 @@
-"""Fiscal Document Agent core with LangChain and Gemini."""
+"""Fiscal Document Agent core with LangChain and Gemini.
+
+This module provides backward compatibility with the old FiscalDocumentAgent
+while internally using the new HybridFiscalAgent for enhanced capabilities.
+"""
 
 import logging
 from typing import Any
 
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.memory import ConversationBufferMemory
-from langchain_core.prompts import PromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-from src.agent.prompts import SYSTEM_PROMPT, USER_GREETING
-from src.agent.tools import ALL_TOOLS
+from src.agent.hybrid_agent import HybridFiscalAgent, create_hybrid_agent
 
 logger = logging.getLogger(__name__)
+
+
+# Default greeting message
+USER_GREETING = """👋 Olá! Sou seu assistente fiscal inteligente.
+
+🎯 **O que posso fazer:**
+
+**🧠 Inteligência Nativa (sem ferramentas):**
+- Responder perguntas gerais (matemática, programação, conceitos)
+- Explicar conceitos fiscais (ICMS, CFOP, NFe, etc.)
+- Escrever código Python
+- Fazer cálculos e raciocínio lógico
+- Traduzir entre idiomas
+
+**🛠️ Ferramentas Especializadas:**
+- Processar e validar documentos fiscais (XMLs)
+- Buscar no banco de dados
+- Gerar relatórios (CSV/Excel) e visualizações
+- Classificar documentos
+- Validar CNPJ, CEP, NCM
+- Arquivar documentos
+
+**🚀 Capacidades Dinâmicas:**
+- Executar código Python para cálculos complexos
+- Buscar informações na internet (se habilitado)
+
+💬 **Como me usar:**
+- Pergunte o que quiser! Respondo em Português ou English
+- Para dados do banco: "Quantas notas fiscais temos?"
+- Para relatórios: "Gere relatório de impostos de janeiro"
+- Para conceitos: "O que é ICMS?"
+- Para código: "Escreva Python para calcular juros compostos"
+
+Vamos começar! 🚀
+"""
 
 
 class FiscalDocumentAgent:
     """
     LLM-powered agent for processing Brazilian fiscal documents.
-
-    Uses Google Gemini with LangChain tools for parsing, validation,
-    and answering questions about fiscal documents.
+    
+    This is a wrapper around HybridFiscalAgent for backward compatibility.
+    The hybrid agent provides:
+    - Native LLM reasoning (answer questions, write code, explain concepts)
+    - Specialized fiscal tools (database, reports, validation)
+    - Dynamic capabilities (web search, code execution)
     """
 
-    def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash-lite", temperature: float = 0.3):
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "gemini-2.0-flash-exp",
+        temperature: float = 0.7,
+        enable_web_search: bool = False,
+        enable_code_execution: bool = True,
+    ):
         """
         Initialize the agent.
 
         Args:
             api_key: Google Gemini API key
-            model_name: Gemini model to use (default: gemini-2.5-flash-lite)
-            temperature: Model temperature (0.0-1.0, lower = more deterministic)
+            model_name: Gemini model to use (default: gemini-2.0-flash-exp)
+            temperature: Model temperature (0.0-1.0, higher = more creative)
+            enable_web_search: Enable web search capability (requires setup)
+            enable_code_execution: Enable Python code execution in sandbox
         """
         self.api_key = api_key
         self.model_name = model_name
         self.temperature = temperature
-
-        # Initialize LLM
-        self.llm = ChatGoogleGenerativeAI(
-            model=model_name,
-            google_api_key=api_key,
+        
+        # Use hybrid agent internally
+        self._hybrid_agent = create_hybrid_agent(
+            api_key=api_key,
+            model_name=model_name,
             temperature=temperature,
-            convert_system_message_to_human=True,  # Gemini requires this
+            enable_web_search=enable_web_search,
+            enable_code_execution=enable_code_execution,
         )
-
-        # Initialize memory
-        self.memory = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            output_key="output",
+        
+        logger.info(
+            f"✅ FiscalDocumentAgent initialized: model={model_name}, "
+            f"temp={temperature}, web={enable_web_search}, code={enable_code_execution}"
         )
-
-        # Create prompt template with system prompt embedded
-        prompt_text = f"""
-{SYSTEM_PROMPT}
-
-FERRAMENTAS:
-{{tools}}
-
-FORMATO DE USO DAS FERRAMENTAS:
-Para usar uma ferramenta, use este formato EXATO:
-
-Thought: [seu raciocínio sobre o que fazer]
-Action: [nome da ferramenta]
-Action Input: [entrada para a ferramenta]
-Observation: [resultado da ferramenta]
-
-Quando tiver a resposta final:
-Thought: Tenho a resposta final
-Final Answer: [sua resposta ao usuário]
-
-HISTÓRICO DA CONVERSA:
-{{chat_history}}
-
-PERGUNTA DO USUÁRIO: {{input}}
-
-SEUS NOMES DE FERRAMENTAS: {{tool_names}}
-
-{{agent_scratchpad}}
-"""
-        self.prompt = PromptTemplate.from_template(prompt_text)
-
-        # Create agent
-        self.agent = create_react_agent(
-            llm=self.llm,
-            tools=ALL_TOOLS,
-            prompt=self.prompt,
-        )
-
-        # Create executor
-        self.executor = AgentExecutor(
-            agent=self.agent,
-            tools=ALL_TOOLS,
-            memory=self.memory,
-            verbose=True,
-            handle_parsing_errors=True,
-            max_iterations=5,
-            early_stopping_method="generate",
-        )
-
-        logger.info(f"Agent initialized with model {model_name}")
 
     def chat(self, message: str) -> str:
         """
@@ -110,41 +104,55 @@ SEUS NOMES DE FERRAMENTAS: {{tool_names}}
         Returns:
             Agent response
         """
-        try:
-            logger.info(f"Processing message: {message[:100]}...")
+        return self._hybrid_agent.chat(message)
+    
+    async def achat(self, message: str) -> str:
+        """
+        Async version of chat.
 
-            # Pass only 'input' to avoid memory key conflict
-            response = self.executor.invoke({"input": message})
+        Args:
+            message: User message
 
-            output = response.get("output", "")
-            logger.info(f"Response generated: {output[:100]}...")
-
-            return output
-
-        except Exception as e:
-            logger.error(f"Error in chat: {e}", exc_info=True)
-            return f"❌ Desculpe, ocorreu um erro ao processar sua mensagem: {str(e)}"
-            return f"❌ Desculpe, ocorreu um erro ao processar sua mensagem: {str(e)}"
+        Returns:
+            Agent response
+        """
+        return await self._hybrid_agent.achat(message)
 
     def reset_memory(self) -> None:
         """Clear conversation history."""
-        self.memory.clear()
-        logger.info("Memory cleared")
+        self._hybrid_agent.clear_memory()
+        logger.info("🧹 Conversation memory cleared")
 
     def get_greeting(self) -> str:
         """Get initial greeting message."""
         return USER_GREETING
+    
+    def get_capabilities(self) -> dict:
+        """Get agent capabilities information."""
+        return self._hybrid_agent.get_capabilities()
 
 
-def create_agent(api_key: str, model_name: str = "gemini-2.5-flash-lite") -> FiscalDocumentAgent:
+def create_agent(
+    api_key: str,
+    model_name: str = "gemini-2.0-flash-exp",
+    enable_web_search: bool = False,
+    enable_code_execution: bool = True,
+) -> FiscalDocumentAgent:
     """
     Factory function to create a fiscal document agent.
 
     Args:
         api_key: Google Gemini API key
-        model_name: Gemini model to use
+        model_name: Gemini model to use (default: gemini-2.0-flash-exp)
+        enable_web_search: Enable web search capability
+        enable_code_execution: Enable Python code execution
 
     Returns:
-        Configured FiscalDocumentAgent instance
+        Initialized FiscalDocumentAgent
     """
-    return FiscalDocumentAgent(api_key=api_key, model_name=model_name)
+    return FiscalDocumentAgent(
+        api_key=api_key,
+        model_name=model_name,
+        enable_web_search=enable_web_search,
+        enable_code_execution=enable_code_execution,
+    )
