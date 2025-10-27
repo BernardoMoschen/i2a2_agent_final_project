@@ -8,21 +8,21 @@ O agente está pronto para uso via chat em **Português** ou **Inglês**!
 
 ## 🎯 13 Ferramentas Disponíveis
 
-| # | Ferramenta | Quando Usar | Exemplo |
-|---|-----------|-------------|---------|
-| 1 | `parse_fiscal_xml` | Parse de XMLs fiscais | "Parse este XML da NFe" |
-| 2 | `validate_fiscal_document` | Validar regras fiscais | "Valide este documento" |
-| 3 | `search_invoices_database` | Buscar notas no BD | "Busque notas de compra com falhas" |
-| 4 | `get_database_statistics` | Estatísticas do BD | "Mostre stats do banco" |
-| 5 | `fiscal_report_export` | Relatórios CSV/XLSX | "Gere relatório Excel de impostos" |
-| 6 | `generate_report` | Gráficos interativos | "Mostre gráfico de vendas" |
-| 7 | `classify_invoice` | Classificar operação | "Classifique este documento" |
-| 8 | `validate_cnpj` | Validar CNPJ | "Valide CNPJ 12.345.678/0001-90" |
-| 9 | `validate_cep` | Validar CEP | "Valide CEP 01310-100" |
-| 10 | `lookup_ncm` | Consultar NCM | "O que é NCM 84714900?" |
-| 11 | `fiscal_knowledge` | Perguntas fiscais | "O que é CFOP 5102?" |
-| 12 | `archive_invoice` | Arquivar documento | "Arquive esta nota" |
-| 13 | `archive_all_invoices` | Arquivar em lote | "Arquive todas de 2024" |
+| #   | Ferramenta                 | Quando Usar            | Exemplo                             |
+| --- | -------------------------- | ---------------------- | ----------------------------------- |
+| 1   | `parse_fiscal_xml`         | Parse de XMLs fiscais  | "Parse este XML da NFe"             |
+| 2   | `validate_fiscal_document` | Validar regras fiscais | "Valide este documento"             |
+| 3   | `search_invoices_database` | Buscar notas no BD     | "Busque notas de compra com falhas" |
+| 4   | `get_database_statistics`  | Estatísticas do BD     | "Mostre stats do banco"             |
+| 5   | `fiscal_report_export`     | Relatórios CSV/XLSX    | "Gere relatório Excel de impostos"  |
+| 6   | `generate_report`          | Gráficos interativos   | "Mostre gráfico de vendas"          |
+| 7   | `classify_invoice`         | Classificar operação   | "Classifique este documento"        |
+| 8   | `validate_cnpj`            | Validar CNPJ           | "Valide CNPJ 12.345.678/0001-90"    |
+| 9   | `validate_cep`             | Validar CEP            | "Valide CEP 01310-100"              |
+| 10  | `lookup_ncm`               | Consultar NCM          | "O que é NCM 84714900?"             |
+| 11  | `fiscal_knowledge`         | Perguntas fiscais      | "O que é CFOP 5102?"                |
+| 12  | `archive_invoice`          | Arquivar documento     | "Arquive esta nota"                 |
+| 13  | `archive_all_invoices`     | Arquivar em lote       | "Arquive todas de 2024"             |
 
 ---
 
@@ -33,15 +33,19 @@ O agente está pronto para uso via chat em **Português** ou **Inglês**!
 ```
 Gere um relatório de documentos com falhas do mês de janeiro de 2024
 ```
+
 ```
 Create an Excel report of taxes by period for the last quarter
 ```
+
 ```
 Exportar para CSV todos os impostos entre março e junho
 ```
+
 ```
 Top 10 suppliers by value in last 90 days
 ```
+
 ```
 Relatório de documentos sem falhas de 2024
 ```
@@ -51,12 +55,15 @@ Relatório de documentos sem falhas de 2024
 ```
 Mostre um gráfico de breakdown de impostos
 ```
+
 ```
 Show me sales by month chart
 ```
+
 ```
 Gere gráfico de ranking de fornecedores
 ```
+
 ```
 Create purchases timeline visualization
 ```
@@ -66,12 +73,15 @@ Create purchases timeline visualization
 ```
 Busque todas as notas fiscais de compra
 ```
+
 ```
 Search for invoices with issues from supplier CNPJ 12.345.678/0001-90
 ```
+
 ```
 Mostre estatísticas do banco de dados
 ```
+
 ```
 Find all documents processed in January 2024
 ```
@@ -81,12 +91,15 @@ Find all documents processed in January 2024
 ```
 Valide o CNPJ 12.345.678/0001-90
 ```
+
 ```
 Validate CEP 01310-100
 ```
+
 ```
 Lookup NCM code 84714900
 ```
+
 ```
 O que é CFOP 5102?
 ```
@@ -96,15 +109,19 @@ O que é CFOP 5102?
 ```
 Busque notas de compra com falhas e exporte para Excel
 ```
+
 ```
 Valide este CNPJ e mostre todas as notas dele
 ```
+
 ```
 Gere relatório de impostos de janeiro e crie um gráfico
 ```
+
 ```
 Parse este XML, valide e classifique o tipo de operação
 ```
+
 ```
 Top 10 fornecedores, valide os CNPJs e mostre gráfico de evolução
 ```
@@ -114,30 +131,35 @@ Top 10 fornecedores, valide os CNPJs e mostre gráfico de evolução
 ## 📋 18 Tipos de Relatórios Disponíveis
 
 ### Validação (5)
+
 - `documents_with_issues` - Documentos com falhas
-- `documents_without_issues` - Documentos sem falhas  
+- `documents_without_issues` - Documentos sem falhas
 - `issues_by_type` - Falhas por tipo
 - `issues_by_issuer` - Falhas por fornecedor
 - `issues_by_severity` - Falhas por gravidade
 
 ### Financeiro (4)
+
 - `taxes_by_period` - Impostos por período
 - `total_value_by_period` - Valor total por período
 - `top_suppliers_by_value` - Top fornecedores por valor
 - `costs_by_center` - Custos por centro
 
 ### Operacional (3)
+
 - `documents_by_operation_type` - Por tipo de operação
 - `documents_by_document_type` - Por tipo de documento
 - `volume_by_period` - Volume por período
 
 ### Classificação (4)
+
 - `cache_effectiveness` - Efetividade do cache
 - `unclassified_documents` - Documentos não classificados
 - `classification_by_cost_center` - Por centro de custo
 - `llm_fallback_usage` - Uso de fallback LLM
 
 ### Produtos (3)
+
 - `top_products_by_ncm` - Top produtos por NCM
 - `analysis_by_cfop` - Análise por CFOP
 - `items_with_issues` - Itens com problemas
@@ -147,6 +169,7 @@ Top 10 fornecedores, valide os CNPJs e mostre gráfico de evolução
 ## 🎨 Filtros Suportados
 
 ### Datas
+
 ```
 "do mês de janeiro de 2024"
 "between January and March 2024"
@@ -156,6 +179,7 @@ Top 10 fornecedores, valide os CNPJs e mostre gráfico de evolução
 ```
 
 ### Tipos de Operação
+
 ```
 "de compra" / "purchase"
 "de venda" / "sale"
@@ -163,6 +187,7 @@ Top 10 fornecedores, valide os CNPJs e mostre gráfico de evolução
 ```
 
 ### Tipos de Documento
+
 ```
 "NFe"
 "NFCe"
@@ -171,12 +196,14 @@ Top 10 fornecedores, valide os CNPJs e mostre gráfico de evolução
 ```
 
 ### Gravidade de Falhas
+
 ```
 "error" / "erro"
 "warning" / "aviso"
 ```
 
 ### Outros
+
 ```
 "CNPJ 12.345.678/0001-90"
 "centro de custo X"
@@ -189,24 +216,30 @@ Top 10 fornecedores, valide os CNPJs e mostre gráfico de evolução
 ## 🚀 Como Usar
 
 ### Via Streamlit (Interface Web)
+
 ```bash
 streamlit run src/ui/app.py
 ```
+
 1. Insira chave API Gemini
 2. Vá para aba "💬 Chat"
 3. Digite suas consultas
 4. Aguarde resposta do agente
 
 ### Via Demo Interativo
+
 ```bash
 python examples/demo_agent_chat.py --api-key SUA_CHAVE
 ```
+
 Comandos dentro do demo:
+
 - `help` - Mostrar exemplos
 - `tools` - Listar ferramentas
 - `quit` - Sair
 
 ### Via Código Python
+
 ```python
 from src.agent.agent_core import create_agent
 
@@ -220,17 +253,20 @@ print(response)
 ## 💡 Dicas de Uso
 
 ### ✅ Boas Práticas
+
 - Seja específico nos filtros de data
 - Use termos em PT ou EN, mas consistentemente
 - Para relatórios, especifique o formato desejado (CSV/XLSX)
 - Para gráficos, mencione "gráfico" ou "chart"
 
 ### ⚠️ Evite
+
 - Misturar PT e EN na mesma frase
 - Filtros muito vagos ("alguns documentos")
 - Nomes de campos incorretos
 
 ### 🔧 Se o agente não entender
+
 - Reformule a pergunta
 - Adicione mais contexto
 - Especifique a ferramenta: "use fiscal_report_export para..."
@@ -256,6 +292,7 @@ python tests/test_agent_tools_integration.py
 ```
 
 Esperado:
+
 ```
 ✅ PASSED: Tool Registration
 ✅ PASSED: Name Uniqueness

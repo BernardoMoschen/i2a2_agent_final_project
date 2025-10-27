@@ -15,29 +15,36 @@
 The agent has autonomous access to the following tools via chat:
 
 #### 1️⃣ **Core Document Processing** (2 tools)
+
 - `parse_fiscal_xml` - Parse NFe/NFCe/CTe/MDFe XML documents
 - `validate_fiscal_document` - Validate documents against fiscal rules
 
 #### 2️⃣ **Database Operations** (2 tools)
+
 - `search_invoices_database` - Search and filter invoices
 - `get_database_statistics` - Get database stats and metrics
 
 #### 3️⃣ **Reports & Visualization** (2 tools)
+
 - `fiscal_report_export` - Generate CSV/XLSX reports for download (NEW)
 - `generate_report` - Generate interactive Plotly charts for chat
 
 #### 4️⃣ **Classification & Analysis** (1 tool)
+
 - `classify_invoice` - Classify documents by operation type
 
 #### 5️⃣ **External Validation** (3 tools)
+
 - `validate_cnpj` - Validate CNPJ via ReceitaWS API
 - `validate_cep` - Validate CEP codes
 - `lookup_ncm` - Lookup NCM product codes
 
 #### 6️⃣ **Knowledge Base** (1 tool)
+
 - `fiscal_knowledge` - Answer fiscal/tax questions
 
 #### 7️⃣ **Document Archiving** (2 tools)
+
 - `archive_invoice` - Archive individual documents
 - `archive_all_invoices` - Batch archive multiple documents
 
@@ -46,17 +53,22 @@ The agent has autonomous access to the following tools via chat:
 ## 🔧 Resolution of Naming Conflict
 
 ### Problem Identified
+
 Two tools were named `ReportGeneratorTool`:
+
 1. **business_tools.py** - Generates interactive Plotly charts (tool name: `generate_report`)
 2. **report_tool.py** - Generates CSV/XLSX files (tool name: was `generate_fiscal_report`)
 
 ### Solution Applied
+
 Renamed the new CSV/XLSX report generator:
+
 - **Class name:** `ReportGeneratorTool` → `FiscalReportExportTool`
 - **Tool name:** `generate_fiscal_report` → `fiscal_report_export`
 - **Purpose:** Clear distinction between file export vs interactive charts
 
 ### Differentiation
+
 - **`fiscal_report_export`** - Use when user wants CSV/XLSX files to download
 - **`generate_report`** - Use when user wants interactive charts in the chat
 
@@ -65,6 +77,7 @@ Renamed the new CSV/XLSX report generator:
 ## 💬 Chat Examples - Agent Autonomy Tests
 
 ### Test Case 1: Report Generation (Portuguese)
+
 ```
 User: "Gere um relatório de documentos com falhas do mês de janeiro de 2024 em Excel"
 
@@ -77,6 +90,7 @@ Expected behavior:
 ```
 
 ### Test Case 2: Interactive Chart (English)
+
 ```
 User: "Show me a chart of taxes breakdown for the last 90 days"
 
@@ -89,6 +103,7 @@ Expected behavior:
 ```
 
 ### Test Case 3: Database Search + Report
+
 ```
 User: "Busque todas as notas de compra com falhas e exporte para CSV"
 
@@ -100,6 +115,7 @@ Expected behavior:
 ```
 
 ### Test Case 4: Validation + Classification
+
 ```
 User: "Parse this XML, validate it, and classify the operation type"
 
@@ -112,6 +128,7 @@ Expected behavior:
 ```
 
 ### Test Case 5: CNPJ Validation + Search
+
 ```
 User: "Valide o CNPJ 12.345.678/0001-90 e mostre todas as notas deste fornecedor"
 
@@ -123,6 +140,7 @@ Expected behavior:
 ```
 
 ### Test Case 6: Archive Workflow
+
 ```
 User: "Archive all processed invoices from 2024"
 
@@ -134,8 +152,9 @@ Expected behavior:
 ```
 
 ### Test Case 7: Complex Multi-Step
+
 ```
-User: "Gere um relatório dos top 10 fornecedores por valor, valide os CNPJs deles, 
+User: "Gere um relatório dos top 10 fornecedores por valor, valide os CNPJs deles,
 e crie um gráfico de evolução mensal"
 
 Expected behavior:
@@ -147,6 +166,7 @@ Expected behavior:
 ```
 
 ### Test Case 8: Bilingual Support
+
 ```
 User (PT): "relatório de impostos entre março e junho"
 User (EN): "tax report between march and june"
@@ -164,16 +184,16 @@ Both queries should:
 
 ## 🎯 Verification Checklist
 
-| Check | Status | Details |
-|-------|--------|---------|
-| All 13 tools registered | ✅ | Verified in ALL_TOOLS list |
-| No duplicate tool names | ✅ | All names unique |
-| Proper metadata | ✅ | Name, description, args_schema present |
-| Report tools separated | ✅ | CSV export vs Plotly charts distinct |
-| Bilingual support | ✅ | PT/EN parsing implemented |
-| Agent can access tools | ✅ | ALL_TOOLS passed to agent |
-| Tool chaining possible | ✅ | Agent can use multiple tools |
-| Error handling | ✅ | Each tool has try/except blocks |
+| Check                   | Status | Details                                |
+| ----------------------- | ------ | -------------------------------------- |
+| All 13 tools registered | ✅     | Verified in ALL_TOOLS list             |
+| No duplicate tool names | ✅     | All names unique                       |
+| Proper metadata         | ✅     | Name, description, args_schema present |
+| Report tools separated  | ✅     | CSV export vs Plotly charts distinct   |
+| Bilingual support       | ✅     | PT/EN parsing implemented              |
+| Agent can access tools  | ✅     | ALL_TOOLS passed to agent              |
+| Tool chaining possible  | ✅     | Agent can use multiple tools           |
+| Error handling          | ✅     | Each tool has try/except blocks        |
 
 ---
 
@@ -198,12 +218,15 @@ TEST RESULTS SUMMARY
 ## 📝 Implementation Details
 
 ### Files Modified
+
 1. **src/agent/report_tool.py**
+
    - Renamed `ReportGeneratorTool` → `FiscalReportExportTool`
    - Updated tool name: `fiscal_report_export`
    - Added differentiation note in description
 
 2. **src/agent/tools.py**
+
    - Updated import: `FiscalReportExportTool`
    - Updated instance: `fiscal_report_export_tool`
    - Added clarifying comments in ALL_TOOLS
@@ -214,8 +237,9 @@ TEST RESULTS SUMMARY
    - Tests report tools separation
 
 ### Architecture
+
 ```
-User Query (Chat) 
+User Query (Chat)
     ↓
 LangChain Agent (agent_core.py)
     ↓
@@ -242,20 +266,24 @@ Return Results to User
 To fully verify agent autonomy in a live environment:
 
 1. **Start Streamlit App**
+
    ```bash
    streamlit run src/ui/app.py
    ```
 
 2. **Configure API Key**
+
    - Enter Gemini API key in sidebar
    - Select model: `gemini-2.0-flash-exp` or `gemini-1.5-pro`
 
 3. **Test Chat Interactions**
+
    - Try each test case from "Chat Examples" above
    - Verify agent selects correct tools
    - Check outputs match expected behavior
 
 4. **Monitor Agent Decisions**
+
    - Enable verbose logging to see tool selection process
    - Check agent reasoning for tool choices
    - Verify error handling and fallbacks
@@ -282,6 +310,7 @@ To fully verify agent autonomy in a live environment:
 **The agent is now fully capable of autonomous operation with all 13 tools.**
 
 Key achievements:
+
 - ✅ Resolved naming conflict (FiscalReportExportTool vs ReportGeneratorTool)
 - ✅ All tools properly registered and accessible
 - ✅ Unique tool names ensure correct selection
@@ -290,6 +319,7 @@ Key achievements:
 - ✅ Comprehensive testing infrastructure created
 
 The agent can now:
+
 - Parse and validate fiscal documents
 - Search and query database
 - Generate CSV/XLSX reports for download
