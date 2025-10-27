@@ -17,6 +17,7 @@ pandas>=2.1.0
 openpyxl>=3.1.0
 matplotlib>=3.8.0
 seaborn>=0.13.0
+plotly>=5.18.0
 
 # Web UI
 streamlit>=1.29.0
@@ -29,6 +30,9 @@ pydantic-settings>=2.1.0
 # Utilities
 python-dateutil>=2.8.2
 pytz>=2023.3
+
+# HTTP Client for External APIs
+httpx>=0.25.0
 
 # Development and Testing
 pytest>=7.4.0

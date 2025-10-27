@@ -111,6 +111,34 @@ class ValidationIssueDB(SQLModel, table=True):
     invoice: InvoiceDB = Relationship(back_populates="issues")
 
 
+class ClassificationCacheDB(SQLModel, table=True):
+    """Cache table for document classifications to reduce LLM calls."""
+
+    __tablename__ = "classification_cache"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    # Cache key (hash of issuer_cnpj + ncm + cfop)
+    cache_key: str = Field(unique=True, index=True)
+    
+    # Classification result
+    operation_type: str
+    cost_center: str
+    confidence: float
+    reasoning: Optional[str] = Field(default=None)
+    used_llm: bool = Field(default=False)
+    
+    # Metadata
+    issuer_cnpj: str = Field(index=True)
+    ncm: Optional[str] = Field(default=None, index=True)
+    cfop: str = Field(index=True)
+    
+    # Usage stats
+    hit_count: int = Field(default=0)
+    last_used_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class DatabaseManager:
     """Manage SQLite database operations."""
 
@@ -389,3 +417,121 @@ class DatabaseManager:
                 ValidationIssueDB.invoice_id == invoice_id
             )
             return list(session.exec(statement).all())
+
+    def get_classification_from_cache(self, cache_key: str) -> Optional[dict]:
+        """Get classification from cache."""
+        with Session(self.engine) as session:
+            statement = select(ClassificationCacheDB).where(
+                ClassificationCacheDB.cache_key == cache_key
+            )
+            cache_entry = session.exec(statement).first()
+            
+            if cache_entry:
+                # Update usage stats
+                cache_entry.hit_count += 1
+                cache_entry.last_used_at = datetime.now(UTC)
+                session.add(cache_entry)
+                session.commit()
+                
+                logger.info(f"Cache HIT for key {cache_key[:16]}... (hits: {cache_entry.hit_count})")
+                
+                return {
+                    "operation_type": cache_entry.operation_type,
+                    "cost_center": cache_entry.cost_center,
+                    "confidence": cache_entry.confidence,
+                    "reasoning": cache_entry.reasoning,
+                    "used_llm_fallback": cache_entry.used_llm,
+                    "from_cache": True,
+                }
+            
+            return None
+
+    def save_classification_to_cache(
+        self,
+        cache_key: str,
+        issuer_cnpj: str,
+        ncm: Optional[str],
+        cfop: str,
+        classification: dict,
+    ) -> None:
+        """Save classification to cache."""
+        with Session(self.engine) as session:
+            # Check if already exists
+            statement = select(ClassificationCacheDB).where(
+                ClassificationCacheDB.cache_key == cache_key
+            )
+            existing = session.exec(statement).first()
+            
+            if existing:
+                # Update existing entry
+                existing.operation_type = classification["operation_type"]
+                existing.cost_center = classification["cost_center"]
+                existing.confidence = classification["confidence"]
+                existing.reasoning = classification.get("reasoning")
+                existing.used_llm = classification.get("used_llm_fallback", False)
+                existing.last_used_at = datetime.now(UTC)
+                session.add(existing)
+            else:
+                # Create new entry
+                cache_entry = ClassificationCacheDB(
+                    cache_key=cache_key,
+                    issuer_cnpj=issuer_cnpj,
+                    ncm=ncm,
+                    cfop=cfop,
+                    operation_type=classification["operation_type"],
+                    cost_center=classification["cost_center"],
+                    confidence=classification["confidence"],
+                    reasoning=classification.get("reasoning"),
+                    used_llm=classification.get("used_llm_fallback", False),
+                )
+                session.add(cache_entry)
+            
+            session.commit()
+            logger.info(f"Saved classification to cache: {cache_key[:16]}...")
+
+    def get_cache_statistics(self) -> dict:
+        """Get cache statistics."""
+        with Session(self.engine) as session:
+            total_entries = len(session.exec(select(ClassificationCacheDB)).all())
+            
+            if total_entries == 0:
+                return {
+                    "total_entries": 0,
+                    "total_hits": 0,
+                    "avg_hits_per_entry": 0,
+                    "cache_effectiveness": 0,
+                }
+            
+            cache_entries = session.exec(select(ClassificationCacheDB)).all()
+            total_hits = sum(entry.hit_count for entry in cache_entries)
+            
+            return {
+                "total_entries": total_entries,
+                "total_hits": total_hits,
+                "avg_hits_per_entry": total_hits / total_entries if total_entries > 0 else 0,
+                "cache_effectiveness": (total_hits / (total_entries + total_hits)) * 100 if (total_entries + total_hits) > 0 else 0,
+            }
+
+    def update_invoice_classification(
+        self,
+        document_key: str,
+        classification: dict,
+    ) -> bool:
+        """Update invoice classification fields."""
+        with Session(self.engine) as session:
+            statement = select(InvoiceDB).where(InvoiceDB.document_key == document_key)
+            invoice = session.exec(statement).first()
+            
+            if invoice:
+                invoice.operation_type = classification.get("operation_type")
+                invoice.cost_center = classification.get("cost_center")
+                invoice.classification_confidence = classification.get("confidence")
+                invoice.classification_reasoning = classification.get("reasoning")
+                invoice.used_llm_fallback = classification.get("used_llm_fallback", False)
+                
+                session.add(invoice)
+                session.commit()
+                logger.info(f"Updated classification for invoice {document_key}")
+                return True
+            
+            return False

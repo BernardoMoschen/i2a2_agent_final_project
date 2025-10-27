@@ -2,8 +2,10 @@
 Automatic document classifier for operation type and cost center.
 
 Uses rule-based logic with LLM fallback for complex cases.
+Includes intelligent caching to reduce LLM costs.
 """
 
+import hashlib
 import logging
 from typing import Optional
 
@@ -19,6 +21,7 @@ class DocumentClassifier:
     Classification logic:
     1. Operation Type: Based on CFOP (purchase/sale/service/transfer)
     2. Cost Center: Based on issuer, NCM, and business rules
+    3. Intelligent caching to reduce LLM costs
     """
 
     # CFOP ranges for operation type classification
@@ -67,23 +70,69 @@ class DocumentClassifier:
         ("2716",): "Operações - Energia",
     }
 
-    def __init__(self, llm_client: Optional[object] = None):
+    def __init__(self, llm_client: Optional[object] = None, database_manager: Optional[object] = None):
         """
         Initialize classifier.
         
         Args:
             llm_client: Optional LLM client for complex classifications
+            database_manager: Database manager for caching
         """
         self.llm_client = llm_client
+        self.db = database_manager
         
         # Create instance copy of NCM mappings to avoid cross-test contamination
         self.ncm_cost_centers = self.NCM_COST_CENTERS.copy()
         
-        logger.info("DocumentClassifier initialized")
+        logger.info("DocumentClassifier initialized with caching support")
+
+    def _create_cache_key(self, invoice: InvoiceModel) -> str:
+        """
+        Create cache key from invoice characteristics.
+        
+        Key based on: issuer_cnpj + primary NCM + primary CFOP
+        This ensures similar documents get same classification.
+        """
+        issuer = invoice.issuer_cnpj or "unknown"
+        
+        # Get primary item (first item, or could be highest value)
+        if invoice.items and len(invoice.items) > 0:
+            ncm = invoice.items[0].ncm or "unknown"
+            cfop = invoice.items[0].cfop or "unknown"
+        else:
+            ncm = "unknown"
+            cfop = "unknown"
+        
+        # Create hash
+        key_string = f"{issuer}_{ncm}_{cfop}"
+        return hashlib.sha256(key_string.encode()).hexdigest()
+        
+        logger.info("DocumentClassifier initialized with caching support")
+
+    def _create_cache_key(self, invoice: InvoiceModel) -> str:
+        """
+        Create cache key from invoice characteristics.
+        
+        Key based on: issuer_cnpj + primary NCM + primary CFOP
+        This ensures similar documents get same classification.
+        """
+        issuer = invoice.issuer_cnpj or "unknown"
+        
+        # Get primary item (first item, or could be highest value)
+        if invoice.items and len(invoice.items) > 0:
+            ncm = invoice.items[0].ncm or "unknown"
+            cfop = invoice.items[0].cfop or "unknown"
+        else:
+            ncm = "unknown"
+            cfop = "unknown"
+        
+        # Create hash
+        key_string = f"{issuer}_{ncm}_{cfop}"
+        return hashlib.sha256(key_string.encode()).hexdigest()
 
     def classify(self, invoice: InvoiceModel) -> ClassificationResult:
         """
-        Classify document by operation type and cost center.
+        Classify document by operation type and cost center with caching.
         
         Args:
             invoice: Parsed invoice model
@@ -91,19 +140,57 @@ class DocumentClassifier:
         Returns:
             ClassificationResult with operation type, cost center, and confidence
         """
+        # Check cache first if database available
+        if self.db:
+            cache_key = self._create_cache_key(invoice)
+            cached_result = self.db.get_classification_from_cache(cache_key)
+            
+            if cached_result:
+                logger.info(f"Using cached classification for {invoice.document_key[:16]}...")
+                return ClassificationResult(
+                    operation_type=cached_result["operation_type"],
+                    cost_center=cached_result["cost_center"],
+                    confidence=cached_result["confidence"],
+                    reasoning=cached_result.get("reasoning", "From cache"),
+                    used_llm_fallback=cached_result.get("used_llm_fallback", False),
+                )
+        
         # Step 1: Classify operation type (rule-based)
         operation_type = self._classify_operation_type(invoice)
         
         # Step 2: Classify cost center (rule-based with LLM fallback)
         cost_center, confidence, reasoning, fallback = self._classify_cost_center(invoice)
         
-        return ClassificationResult(
+        result = ClassificationResult(
             operation_type=operation_type,
             cost_center=cost_center,
             confidence=confidence,
             reasoning=reasoning,
             used_llm_fallback=fallback,
         )
+        
+        # Save to cache if database available
+        if self.db:
+            cache_key = self._create_cache_key(invoice)
+            issuer_cnpj = invoice.issuer_cnpj or "unknown"
+            ncm = invoice.items[0].ncm if invoice.items else None
+            cfop = invoice.items[0].cfop if invoice.items else "unknown"
+            
+            self.db.save_classification_to_cache(
+                cache_key=cache_key,
+                issuer_cnpj=issuer_cnpj,
+                ncm=ncm,
+                cfop=cfop,
+                classification={
+                    "operation_type": operation_type,
+                    "cost_center": cost_center,
+                    "confidence": confidence,
+                    "reasoning": reasoning,
+                    "used_llm_fallback": fallback,
+                },
+            )
+        
+        return result
 
     def _classify_operation_type(self, invoice: InvoiceModel) -> str:
         """

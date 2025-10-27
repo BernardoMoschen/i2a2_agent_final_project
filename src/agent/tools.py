@@ -465,6 +465,10 @@ fiscal_knowledge_tool = FiscalKnowledgeTool()
 database_search_tool = DatabaseSearchTool()
 database_stats_tool = DatabaseStatsTool()
 
+# Import business tools
+from src.agent.business_tools import ALL_BUSINESS_TOOLS
+from src.agent.archiver_tools import ALL_ARCHIVER_TOOLS
+
 # List of all tools
 ALL_TOOLS = [
     parse_xml_tool,
@@ -472,4 +476,5 @@ ALL_TOOLS = [
     fiscal_knowledge_tool,
     database_search_tool,
     database_stats_tool,
-]
+] + ALL_BUSINESS_TOOLS + ALL_ARCHIVER_TOOLS
+

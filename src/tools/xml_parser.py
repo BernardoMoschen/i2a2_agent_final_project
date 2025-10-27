@@ -112,13 +112,26 @@ class XMLParserTool:
         # Extract tax regime (CRT) - NEW
         tax_regime = self._get_text(emit, "CRT")
         
+        # Extract issuer IE (Inscrição Estadual) - NEW
+        issuer_ie = self._get_text(emit, "IE")
+        
         # Extract issuer UF - NEW
         issuer_uf = self._get_text(emit, "UF")
+        issuer_municipio = None
+        issuer_cep = None
         if not issuer_uf:
             # Try enderEmit/UF
             ender_emit = emit.find(".//enderEmit", self.NAMESPACES) or emit.find(".//nfe:enderEmit", self.NAMESPACES)
             if ender_emit is not None:
                 issuer_uf = self._get_text(ender_emit, "UF")
+                issuer_municipio = self._get_text(ender_emit, "xMun")
+                issuer_cep = self._get_text(ender_emit, "CEP")
+        else:
+            # Also try to get municipio and CEP
+            ender_emit = emit.find(".//enderEmit", self.NAMESPACES) or emit.find(".//nfe:enderEmit", self.NAMESPACES)
+            if ender_emit is not None:
+                issuer_municipio = self._get_text(ender_emit, "xMun")
+                issuer_cep = self._get_text(ender_emit, "CEP")
 
         # Dest section (recipient) - optional for NFCe
         dest = inf_nfe.find(".//dest", self.NAMESPACES) or inf_nfe.find(
@@ -127,9 +140,13 @@ class XMLParserTool:
         recipient_cnpj_cpf = None
         recipient_name = None
         recipient_uf = None
+        recipient_municipio = None
+        recipient_cep = None
+        recipient_ie = None
         if dest is not None:
             recipient_cnpj_cpf = self._get_text(dest, "CNPJ") or self._get_text(dest, "CPF")
             recipient_name = self._get_text(dest, "xNome")
+            recipient_ie = self._get_text(dest, "IE")
             
             # Extract recipient UF - NEW
             recipient_uf = self._get_text(dest, "UF")
@@ -138,6 +155,14 @@ class XMLParserTool:
                 ender_dest = dest.find(".//enderDest", self.NAMESPACES) or dest.find(".//nfe:enderDest", self.NAMESPACES)
                 if ender_dest is not None:
                     recipient_uf = self._get_text(ender_dest, "UF")
+                    recipient_municipio = self._get_text(ender_dest, "xMun")
+                    recipient_cep = self._get_text(ender_dest, "CEP")
+            else:
+                # Also try to get municipio and CEP
+                ender_dest = dest.find(".//enderDest", self.NAMESPACES) or dest.find(".//nfe:enderDest", self.NAMESPACES)
+                if ender_dest is not None:
+                    recipient_municipio = self._get_text(ender_dest, "xMun")
+                    recipient_cep = self._get_text(ender_dest, "CEP")
 
         # Total section
         total = inf_nfe.find(".//total/ICMSTot", self.NAMESPACES) or inf_nfe.find(
@@ -183,6 +208,12 @@ class XMLParserTool:
             recipient_name=recipient_name,
             issuer_uf=issuer_uf,
             recipient_uf=recipient_uf,
+            issuer_municipio=issuer_municipio,
+            recipient_municipio=recipient_municipio,
+            issuer_cep=issuer_cep,
+            recipient_cep=recipient_cep,
+            issuer_ie=issuer_ie,
+            recipient_ie=recipient_ie,
             tax_regime=tax_regime,
             total_products=total_products,
             total_taxes=total_taxes,

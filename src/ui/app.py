@@ -2,6 +2,7 @@
 
 import logging
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Add project root to path
@@ -11,13 +12,7 @@ sys.path.insert(0, str(project_root))
 import streamlit as st
 
 from src.agent.agent_core import create_agent
-from src.utils.file_processing import (
-    FileProcessor,
-    format_classification,
-    format_invoice_summary,
-    format_items_table,
-    format_validation_issues,
-)
+from src.utils.file_processing import format_classification
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -95,102 +90,14 @@ def main() -> None:
         st.info(f"💾 Database: {db_path}")
 
     # Main content area
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📤 Upload", "📋 History", "💬 Chat", "📊 Validation", "📈 Reports"]
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["⚡ Upload", "📋 History", "💬 Chat", "📊 Validation", "📈 Reports", "📊 Statistics"]
     )
 
     with tab1:
-        st.header("Upload Fiscal Documents")
-        st.markdown("Upload single XML files or ZIP archives containing multiple documents.")
-
-        uploaded_files = st.file_uploader(
-            "Choose XML or ZIP files",
-            type=["xml", "zip"],
-            accept_multiple_files=True,
-        )
-
-        if uploaded_files:
-            st.success(f"✅ {len(uploaded_files)} file(s) uploaded")
-
-            # Process button
-            if st.button("🔍 Process All Files", type="primary", use_container_width=True):
-                processor = FileProcessor()
-
-                # Initialize progress
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-
-                all_results = []
-
-                # Process each file
-                for idx, uploaded_file in enumerate(uploaded_files):
-                    status_text.text(f"Processing {uploaded_file.name}...")
-
-                    # Read file content
-                    file_content = uploaded_file.read()
-
-                    # Process file
-                    results = processor.process_file(file_content, uploaded_file.name)
-                    all_results.extend(results)
-
-                    # Update progress
-                    progress_bar.progress((idx + 1) / len(uploaded_files))
-
-                status_text.text(f"✅ Processed {len(all_results)} document(s)")
-                progress_bar.empty()
-
-                # Store results in session state
-                st.session_state.processed_documents = all_results
-
-                # Display results
-                st.divider()
-                st.subheader("📋 Processing Results")
-
-                for result in all_results:
-                    filename, invoice, issues = result[0], result[1], result[2]
-                    classification = result[3] if len(result) > 3 else None
-                    
-                    with st.expander(f"📄 {filename} - {invoice.document_type} {invoice.document_number}", expanded=True):
-                        # Summary
-                        st.markdown(format_invoice_summary(invoice))
-
-                        # Classification
-                        st.markdown("#### 🏷️ Classificação")
-                        st.markdown(format_classification(classification))
-
-                        # Validation
-                        st.markdown("#### ✅ Validação")
-                        st.markdown(format_validation_issues(issues))
-
-                        # Items table
-                        st.markdown("#### 🛒 Itens do Documento")
-                        st.markdown(format_items_table(invoice))
-
-            # Display previously processed documents
-            elif "processed_documents" in st.session_state and st.session_state.processed_documents:
-                st.divider()
-                st.subheader("📋 Recently Processed Documents")
-                
-                # Show only last 10 documents from current session
-                recent_docs = st.session_state.processed_documents[-10:]
-                
-                st.info(
-                    f"ℹ️ Showing {len(recent_docs)} most recent documents from this session. "
-                    f"View all {len(st.session_state.processed_documents)} documents in the **History** tab."
-                )
-
-                for result in recent_docs:
-                    filename, invoice, issues = result[0], result[1], result[2]
-                    classification = result[3] if len(result) > 3 else None
-                    
-                    with st.expander(f"📄 {filename} - {invoice.document_type} {invoice.document_number}"):
-                        st.markdown(format_invoice_summary(invoice))
-                        st.markdown("#### 🏷️ Classificação")
-                        st.markdown(format_classification(classification))
-                        st.markdown("#### ✅ Validação")
-                        st.markdown(format_validation_issues(issues))
-                        st.markdown("#### 🛒 Itens")
-                        st.markdown(format_items_table(invoice))
+        # Async Upload Tab
+        from src.ui.components.async_upload import render_async_upload_tab
+        render_async_upload_tab()
 
     with tab2:
         st.header("📋 Document History")
@@ -278,8 +185,6 @@ def main() -> None:
             st.session_state.history_page = 1
 
         # Build filters for database query
-        from datetime import datetime, timedelta
-        
         db_filters = {}
         if filter_type != "All":
             db_filters["invoice_type"] = filter_type
@@ -643,6 +548,94 @@ def main() -> None:
 
         st.subheader("📉 Placeholder Visualization")
         st.info("Charts and graphs will appear here once documents are processed.")
+
+    with tab6:
+        st.header("📊 System Statistics")
+        
+        # Cache statistics
+        from src.database.db import DatabaseManager
+        from src.ui.components.cache_stats import render_cache_stats
+        
+        try:
+            db = DatabaseManager()
+            
+            st.subheader("🎯 Classification Cache")
+            st.markdown("Intelligent system that reduces LLM costs by reusing classifications from similar documents.")
+            
+            # Render cache stats (expanded by default in this tab)
+            stats = db.get_cache_statistics()
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "🗄️ Cache Entries",
+                    stats["total_entries"],
+                    help="Unique classifications stored"
+                )
+            
+            with col2:
+                st.metric(
+                    "🎯 Cache Hits",
+                    stats["total_hits"],
+                    help="Times cache was used instead of calling LLM"
+                )
+            
+            with col3:
+                st.metric(
+                    "📈 Effectiveness",
+                    f"{stats['cache_effectiveness']:.1f}%",
+                    help="Percentage of classifications that came from cache"
+                )
+            
+            with col4:
+                avg_hits = stats["avg_hits_per_entry"]
+                cost_saved = stats["total_hits"] * 0.001  # Assuming $0.001 per LLM call
+                st.metric(
+                    "💰 Estimated Savings",
+                    f"${cost_saved:.2f}",
+                    help=f"Savings on LLM calls (avg {avg_hits:.1f} hits/entry)"
+                )
+            
+            if stats["total_entries"] > 0:
+                st.success(
+                    f"✅ Cache working! {stats['total_hits']} classifications "
+                    f"reused from {stats['total_entries']} saved patterns."
+                )
+            else:
+                st.info("💡 No classifications in cache yet. Process some documents to populate the cache.")
+            
+            st.divider()
+            
+            # Database statistics
+            st.subheader("💾 Database Statistics")
+            db_stats = db.get_statistics()
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("📄 Total Documents", db_stats["total_invoices"])
+            
+            with col2:
+                st.metric("🛒 Total Items", db_stats["total_items"])
+            
+            with col3:
+                st.metric("⚠️ Validation Issues", db_stats["total_issues"])
+            
+            # Documents by type
+            if db_stats["by_type"]:
+                st.markdown("#### 📊 Documents by Type")
+                type_df = {
+                    "Type": list(db_stats["by_type"].keys()),
+                    "Count": list(db_stats["by_type"].values())
+                }
+                st.bar_chart(type_df, x="Type", y="Count")
+            
+            st.metric("💵 Total Value Processed", f"R$ {db_stats['total_value']:,.2f}")
+                
+        except Exception as e:
+            logger.error(f"Error loading statistics: {e}")
+            st.error("Error loading statistics")
 
 
 if __name__ == "__main__":

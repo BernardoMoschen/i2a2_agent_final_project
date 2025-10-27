@@ -77,3 +77,7 @@ temp/
 # Streamlit
 .streamlit/secrets.toml
 .streamlit/credentials.toml
+
+# Cache (auto-generated, don't commit)
+data/cache/
+data/ncm_codes_backup.csv
