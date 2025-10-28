@@ -26,6 +26,13 @@ DATE_PRESETS = [
 def _filters_ui() -> Dict:
     """Render filters and return a dict for DB queries."""
     st.subheader("🔍 Filters")
+    # Global text search (issuer/recipient names, item descriptions)
+    q = st.text_input(
+        "Full-text search (issuer/recipient/items)",
+        placeholder="e.g., supplier name, item description, or keywords",
+        key="explorer_q",
+    )
+
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -97,6 +104,8 @@ def _filters_ui() -> Dict:
             end_date = st.date_input("End Date", value=None, key="explorer_end")
 
     filters: Dict = {}
+    if q:
+        filters["q"] = q
     if doc_type != "All":
         filters["invoice_type"] = doc_type
     if operation != "All":
@@ -193,70 +202,144 @@ def render_documents_explorer(db: DatabaseManager) -> None:
     total_pages = max(1, (total_documents + page_size - 1) // page_size)
     st.caption(f"Total: {total_documents} documents · Page {st.session_state.explorer_page}/{total_pages}")
 
-    # Export all filtered (CSV)
+    # Export all filtered (streaming to temp file)
     exp_c1, exp_c2 = st.columns([2, 3])
     with exp_c1:
         st.caption("Export")
         export_disabled = total_documents == 0
+        fmt = st.selectbox(
+            "Format",
+            options=["CSV", "CSV (gzip)", "Parquet"],
+            index=0,
+            disabled=export_disabled,
+            key="explorer_export_fmt",
+        )
         if st.button(
             f"⬇️ Export all filtered ({total_documents} rows)",
             disabled=export_disabled,
             key="explorer_export_all_btn",
         ):
-            with st.spinner("Building CSV for all filtered documents..."):
-                buffer = io.StringIO()
-                writer = csv.writer(buffer)
-                # Header
-                writer.writerow([
-                    "Date",
-                    "Type",
-                    "Operation",
-                    "Number",
-                    "Issuer",
-                    "CNPJ",
-                    "Recipient",
-                    "Recipient Doc",
-                    "Modal",
-                    "Cost Center",
-                    "Confidence",
-                    "Items",
-                    "Total",
-                    "Key",
-                ])
-
+            import tempfile, gzip
+            from io import TextIOWrapper
+            with st.spinner(f"Building {fmt} for all filtered documents..."):
+                # Common header
+                header = [
+                    "Date","Type","Operation","Number","Issuer","CNPJ","Recipient","Recipient Doc",
+                    "Modal","Cost Center","Confidence","Items","Total","Key",
+                ]
                 batch_size = 1000
-                written = 0
-                for ofs in range(0, total_documents, batch_size):
-                    batch = db.search_invoices(limit=batch_size, offset=ofs, **filters)
-                    for inv in batch:
-                        total_invoice = float(inv.total_invoice) if inv.total_invoice else 0.0
-                        op = inv.operation_type or ""
-                        writer.writerow([
-                            inv.issue_date.isoformat() if inv.issue_date else "",
-                            inv.document_type or "",
-                            op,
-                            inv.document_number or "",
-                            inv.issuer_name or "",
-                            inv.issuer_cnpj or "",
-                            inv.recipient_name or "",
-                            inv.recipient_cnpj_cpf or "",
-                            inv.modal or "",
-                            inv.cost_center or "",
-                            f"{inv.classification_confidence:.2f}" if inv.classification_confidence is not None else "",
-                            len(inv.items) if inv.items else 0,
-                            f"{total_invoice:.2f}",
-                            inv.document_key or "",
-                        ])
-                        written += 1
-
-                data = buffer.getvalue().encode("utf-8")
-                st.download_button(
-                    "Download full CSV",
-                    data=data,
-                    file_name="documents_filtered_export.csv",
-                    mime="text/csv",
-                    key="explorer_export_all_dl",
-                )
+                if fmt == "CSV":
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
+                    with open(tmp.name, "w", encoding="utf-8", newline="") as f:
+                        w = csv.writer(f)
+                        w.writerow(header)
+                        for ofs in range(0, total_documents, batch_size):
+                            batch = db.search_invoices(limit=batch_size, offset=ofs, **filters)
+                            for inv in batch:
+                                total_invoice = float(inv.total_invoice) if inv.total_invoice else 0.0
+                                op = inv.operation_type or ""
+                                w.writerow([
+                                    inv.issue_date.isoformat() if inv.issue_date else "",
+                                    inv.document_type or "",
+                                    op,
+                                    inv.document_number or "",
+                                    inv.issuer_name or "",
+                                    inv.issuer_cnpj or "",
+                                    inv.recipient_name or "",
+                                    inv.recipient_cnpj_cpf or "",
+                                    inv.modal or "",
+                                    inv.cost_center or "",
+                                    f"{inv.classification_confidence:.2f}" if inv.classification_confidence is not None else "",
+                                    len(inv.items) if inv.items else 0,
+                                    f"{total_invoice:.2f}",
+                                    inv.document_key or "",
+                                ])
+                    st.download_button(
+                        "Download CSV",
+                        data=open(tmp.name, "rb"),
+                        file_name="documents_filtered_export.csv",
+                        mime="text/csv",
+                        key="explorer_export_all_dl",
+                    )
+                elif fmt == "CSV (gzip)":
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv.gz")
+                    with gzip.open(tmp.name, mode="wt", encoding="utf-8", newline="") as gz:
+                        w = csv.writer(gz)
+                        w.writerow(header)
+                        for ofs in range(0, total_documents, batch_size):
+                            batch = db.search_invoices(limit=batch_size, offset=ofs, **filters)
+                            for inv in batch:
+                                total_invoice = float(inv.total_invoice) if inv.total_invoice else 0.0
+                                op = inv.operation_type or ""
+                                w.writerow([
+                                    inv.issue_date.isoformat() if inv.issue_date else "",
+                                    inv.document_type or "",
+                                    op,
+                                    inv.document_number or "",
+                                    inv.issuer_name or "",
+                                    inv.issuer_cnpj or "",
+                                    inv.recipient_name or "",
+                                    inv.recipient_cnpj_cpf or "",
+                                    inv.modal or "",
+                                    inv.cost_center or "",
+                                    f"{inv.classification_confidence:.2f}" if inv.classification_confidence is not None else "",
+                                    len(inv.items) if inv.items else 0,
+                                    f"{total_invoice:.2f}",
+                                    inv.document_key or "",
+                                ])
+                    st.download_button(
+                        "Download CSV (gzip)",
+                        data=open(tmp.name, "rb"),
+                        file_name="documents_filtered_export.csv.gz",
+                        mime="application/gzip",
+                        key="explorer_export_all_gz_dl",
+                    )
+                elif fmt == "Parquet":
+                    try:
+                        import pyarrow as pa
+                        import pyarrow.parquet as pq
+                    except Exception:
+                        st.error("pyarrow is required for Parquet export. Please install pyarrow.")
+                    else:
+                        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".parquet")
+                        writer = None
+                        try:
+                            for ofs in range(0, total_documents, batch_size):
+                                batch = db.search_invoices(limit=batch_size, offset=ofs, **filters)
+                                rows = []
+                                for inv in batch:
+                                    total_invoice = float(inv.total_invoice) if inv.total_invoice else 0.0
+                                    rows.append({
+                                        "Date": inv.issue_date.isoformat() if inv.issue_date else "",
+                                        "Type": inv.document_type or "",
+                                        "Operation": inv.operation_type or "",
+                                        "Number": inv.document_number or "",
+                                        "Issuer": inv.issuer_name or "",
+                                        "CNPJ": inv.issuer_cnpj or "",
+                                        "Recipient": inv.recipient_name or "",
+                                        "Recipient Doc": inv.recipient_cnpj_cpf or "",
+                                        "Modal": inv.modal or "",
+                                        "Cost Center": inv.cost_center or "",
+                                        "Confidence": inv.classification_confidence if inv.classification_confidence is not None else None,
+                                        "Items": len(inv.items) if inv.items else 0,
+                                        "Total": total_invoice,
+                                        "Key": inv.document_key or "",
+                                    })
+                                df_chunk = pd.DataFrame(rows)
+                                table = pa.Table.from_pandas(df_chunk, preserve_index=False)
+                                if writer is None:
+                                    writer = pq.ParquetWriter(tmp.name, table.schema)
+                                writer.write_table(table)
+                        finally:
+                            if writer is not None:
+                                writer.close()
+                        st.download_button(
+                            "Download Parquet",
+                            data=open(tmp.name, "rb"),
+                            file_name="documents_filtered_export.parquet",
+                            mime="application/octet-stream",
+                            key="explorer_export_all_parquet_dl",
+                        )
 
     with exp_c2:
         st.caption("Export (Excel)")

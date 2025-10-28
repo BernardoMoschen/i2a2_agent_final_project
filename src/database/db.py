@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import List, Optional, Tuple
 
 from sqlalchemy import Index, create_engine, event
+from sqlalchemy import text
 from sqlalchemy.orm import selectinload
 from sqlmodel import Field, Relationship, Session, SQLModel, select
 
@@ -181,6 +182,7 @@ class DatabaseManager:
         """
         self.database_url = database_url
         self.engine = create_engine(database_url, echo=False)
+        self.fts_enabled: bool = False
         
         # Configure SQLite for better performance
         self._configure_sqlite_pragmas()
@@ -270,6 +272,77 @@ class DatabaseManager:
                 conn.exec_driver_sql(
                     f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} ({cols})"
                 )
+
+        # Try to ensure FTS after columns exist
+        self._ensure_fts()
+
+    def _ensure_fts(self) -> None:
+        """Create and populate FTS5 table if available. Sets self.fts_enabled."""
+        if "sqlite" not in self.database_url:
+            self.fts_enabled = False
+            return
+        try:
+            with self.engine.begin() as conn:
+                # Attempt to create FTS5 table
+                conn.exec_driver_sql(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS invoices_fts USING fts5(
+                        invoice_id UNINDEXED,
+                        issuer_name,
+                        recipient_name,
+                        items_text
+                    )
+                    """
+                )
+            self.fts_enabled = True
+        except Exception as e:
+            logger.warning(f"FTS5 not available: {e}")
+            self.fts_enabled = False
+            return
+
+        # Populate if empty
+        try:
+            with self.engine.begin() as conn:
+                cnt = conn.exec_driver_sql("SELECT count(*) FROM invoices_fts").scalar()
+                if cnt == 0:
+                    logger.info("Populating FTS index from existing data (this may take a while)...")
+                    # Build in chunks
+                    offset = 0
+                    batch = 1000
+                    while True:
+                        # Fetch a page of invoices and joined items' descriptions
+                        res = conn.exec_driver_sql(
+                            """
+                            SELECT i.id, i.issuer_name, i.recipient_name
+                            FROM invoices i
+                            ORDER BY i.id
+                            LIMIT :lim OFFSET :off
+                            """,
+                            {"lim": batch, "off": offset},
+                        ).fetchall()
+                        if not res:
+                            break
+                        # For each invoice, collect items_text
+                        inv_ids = [row[0] for row in res]
+                        items_map = {}
+                        if inv_ids:
+                            placeholders = ",".join([str(int(x)) for x in inv_ids])
+                            items_rows = conn.exec_driver_sql(
+                                f"SELECT invoice_id, description FROM invoice_items WHERE invoice_id IN ({placeholders})"
+                            ).fetchall()
+                            for iid, desc in items_rows:
+                                items_map.setdefault(iid, []).append(desc or "")
+                        # Insert into FTS
+                        for iid, issuer_name, recipient_name in res:
+                            items_text = " ".join(items_map.get(iid, []))[:20000]
+                            conn.exec_driver_sql(
+                                "INSERT INTO invoices_fts (invoice_id, issuer_name, recipient_name, items_text) VALUES (:iid, :inm, :rnm, :it)",
+                                {"iid": iid, "inm": issuer_name or "", "rnm": recipient_name or "", "it": items_text},
+                            )
+                        offset += batch
+                    logger.info("FTS index populated")
+        except Exception as e:
+            logger.warning(f"Could not populate FTS index: {e}")
 
     def save_invoice(self, invoice_model, validation_issues: List, classification: Optional[dict] = None) -> InvoiceDB:
         """
@@ -385,6 +458,20 @@ class DatabaseManager:
             
             # Eagerly load relationships before session closes
             session.refresh(invoice_db, ["items", "issues"])
+            
+            # Update FTS index
+            try:
+                if self.fts_enabled:
+                    items_text = " ".join([it.description or "" for it in invoice_db.items])[:20000]
+                    session.exec(
+                        text(
+                            "INSERT INTO invoices_fts (invoice_id, issuer_name, recipient_name, items_text) VALUES (:iid, :inm, :rnm, :it)"
+                        ),
+                        {"iid": invoice_db.id, "inm": invoice_db.issuer_name or "", "rnm": invoice_db.recipient_name or "", "it": items_text},
+                    )
+                    session.commit()
+            except Exception as e:
+                logger.debug(f"FTS update skipped: {e}")
             
             return invoice_db
 
@@ -574,6 +661,21 @@ class DatabaseManager:
             # Refresh all to load relationships
             for invoice_db in saved_invoices:
                 session.refresh(invoice_db, ["items", "issues"])
+            
+            # Batch update FTS
+            try:
+                if self.fts_enabled and saved_invoices:
+                    for inv in saved_invoices:
+                        items_text = " ".join([it.description or "" for it in inv.items])[:20000]
+                        session.exec(
+                            text(
+                                "INSERT INTO invoices_fts (invoice_id, issuer_name, recipient_name, items_text) VALUES (:iid, :inm, :rnm, :it)"
+                            ),
+                            {"iid": inv.id, "inm": inv.issuer_name or "", "rnm": inv.recipient_name or "", "it": items_text},
+                        )
+                    session.commit()
+            except Exception as e:
+                logger.debug(f"FTS batch update skipped: {e}")
         
         return saved_invoices
 
@@ -626,6 +728,7 @@ class DatabaseManager:
         days_back: Optional[int] = None,
         limit: int = 100,
         offset: int = 0,
+        q: Optional[str] = None,
     ) -> List[InvoiceDB]:
         """
         Search invoices with filters.
@@ -656,6 +759,29 @@ class DatabaseManager:
                 selectinload(InvoiceDB.issues)
             )
             
+            # Full-text search
+            if q:
+                if self.fts_enabled:
+                    try:
+                        # Fetch matching IDs via FTS
+                        id_rows = session.exec(
+                            text("SELECT invoice_id FROM invoices_fts WHERE invoices_fts MATCH :q"),
+                            {"q": q},
+                        ).all()
+                        ids = [row[0] for row in id_rows]
+                        if not ids:
+                            return []
+                        statement = statement.where(InvoiceDB.id.in_(ids))
+                    except Exception as e:
+                        logger.debug(f"FTS query failed, fallback to LIKE: {e}")
+                        statement = statement.where(
+                            (InvoiceDB.issuer_name.contains(q)) | (InvoiceDB.recipient_name.contains(q))
+                        )
+                else:
+                    statement = statement.where(
+                        (InvoiceDB.issuer_name.contains(q)) | (InvoiceDB.recipient_name.contains(q))
+                    )
+
             # Handle both document_type and invoice_type (alias)
             doc_type = document_type or invoice_type
             if doc_type:
@@ -722,6 +848,7 @@ class DatabaseManager:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         days_back: Optional[int] = None,
+        q: Optional[str] = None,
     ) -> int:
         """Return total count for given filters (used for pagination)."""
         from sqlalchemy import func
@@ -757,6 +884,28 @@ class DatabaseManager:
                 statement = statement.where(InvoiceDB.issue_date >= start_date)
             if end_date:
                 statement = statement.where(InvoiceDB.issue_date <= end_date)
+
+            # FTS or LIKE for text search
+            if q:
+                if self.fts_enabled:
+                    try:
+                        id_rows = session.exec(
+                            text("SELECT invoice_id FROM invoices_fts WHERE invoices_fts MATCH :q"),
+                            {"q": q},
+                        ).all()
+                        ids = [row[0] for row in id_rows]
+                        if not ids:
+                            return 0
+                        statement = statement.where(InvoiceDB.id.in_(ids))
+                    except Exception as e:
+                        logger.debug(f"FTS count failed, fallback to LIKE: {e}")
+                        statement = statement.where(
+                            (InvoiceDB.issuer_name.contains(q)) | (InvoiceDB.recipient_name.contains(q))
+                        )
+                else:
+                    statement = statement.where(
+                        (InvoiceDB.issuer_name.contains(q)) | (InvoiceDB.recipient_name.contains(q))
+                    )
 
             return session.exec(statement).one()
 
