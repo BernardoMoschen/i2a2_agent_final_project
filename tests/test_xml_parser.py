@@ -225,15 +225,15 @@ class TestXMLParserTool:
     def test_parse_unsupported_document_type(self) -> None:
         """Test that unsupported document types raise ValueError."""
         parser = XMLParserTool()
-        # CTe and MDFe are not yet implemented
-        cte_xml = """<?xml version="1.0" encoding="UTF-8"?>
-        <cteProc xmlns="http://www.portalfiscal.inf.br/cte">
-          <CTe><infCte Id="CTe123"></infCte></CTe>
-        </cteProc>
+        # Unknown document type should raise ValueError
+        unknown_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <unknownProc xmlns="http://www.portalfiscal.inf.br/unknown">
+          <Unknown><infUnknown Id="UNK123"></infUnknown></Unknown>
+        </unknownProc>
         """
 
-        with pytest.raises(NotImplementedError, match="CTe parsing not yet implemented"):
-            parser.parse(cte_xml)
+        with pytest.raises(ValueError, match="Unknown document type from tag"):
+            parser.parse(unknown_xml)
 
     def test_decimal_parsing_with_commas(self) -> None:
         """Test that decimal values with commas are correctly parsed."""

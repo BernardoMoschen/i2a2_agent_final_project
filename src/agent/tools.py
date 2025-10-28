@@ -236,7 +236,7 @@ class SearchInvoicesInput(BaseModel):
     document_type: Optional[str] = Field(None, description="Filter by document type: NFe, NFCe, CTe, or MDFe")
     operation_type: Optional[str] = Field(None, description="Filter by operation type: purchase (compra), sale (venda), transfer (transferência), or return (devolução)")
     issuer_cnpj: Optional[str] = Field(None, description="Filter by issuer CNPJ (14 digits)")
-    days_back: Optional[int] = Field(3650, description="Search last N days. Default is 3650 (10 years) to ensure all documents are found. Use 9999 to search ALL documents ever processed.")
+    days_back: Optional[int] = Field(9999, description="Search last N days. Default is 9999 to search ALL documents ever processed. ALWAYS use 9999 when user asks about counts, years, or 'all' documents.")
 
 
 class DatabaseSearchTool(BaseTool):
@@ -249,28 +249,28 @@ class DatabaseSearchTool(BaseTool):
     🚨 CRITICAL: When user asks about counting or listing documents, you MUST use days_back=9999!
     
     ⚠️ MANDATORY RULES (YOU MUST FOLLOW):
-    1. ANY question with "quantas", "quantos", "how many", "count" → days_back=9999
+    1. ANY question with "quantas", "quantos", "how many", "count", "total" → days_back=9999
     2. ANY question about a specific YEAR (2024, 2023, etc.) → days_back=9999
-    3. ANY question with "todas", "todos", "all", "list" → days_back=9999
-    4. ANY question about totals or statistics → days_back=9999
-    5. Documents in database may be from 2023, 2024, or older → days_back=9999
+    3. ANY question with "todas", "todos", "all", "list", "mostre", "traga" → days_back=9999
+    4. ANY question about specific dates → days_back=9999
+    5. Documents in database may be from any year → ALWAYS use days_back=9999
     
     ✅ CORRECT USAGE EXAMPLES:
-    - "Quantas notas de compra?" → operation_type='purchase', days_back=9999
-    - "How many purchases in 2024?" → operation_type='purchase', days_back=9999
-    - "Quantos arquivos de purchase no ano de 2024?" → operation_type='purchase', days_back=9999
-    - "Mostre todas as vendas" → operation_type='sale', days_back=9999
-    - "Total de documentos" → days_back=9999
+    - "Quantas notas de compra?" → {"operation_type": "purchase", "days_back": 9999}
+    - "Documentos de 2024?" → {"days_back": 9999}
+    - "Me traga 5 XMLs de 2024" → {"days_back": 9999}
+    - "Há documento na data 2024-01-19?" → {"days_back": 9999}
+    - "Total de documentos" → {"days_back": 9999}
     
     ❌ WRONG - DO NOT DO THIS:
-    - Using days_back=30 or days_back=365 for counting questions
-    - Using default value when user asks "quantas" or "how many"
+    - Using days_back=30 or days_back=365 for ANY query
+    - Using "limit" parameter (not supported - tool returns up to 100 results)
     
     OPERATION TYPE MAPPING:
-    - "compra", "purchase", "entrada" → operation_type='purchase'
-    - "venda", "sale", "saída" → operation_type='sale'
-    - "transferência", "transfer" → operation_type='transfer'
-    - "devolução", "return" → operation_type='return'
+    - "compra", "purchase", "entrada" → operation_type="purchase"
+    - "venda", "sale", "saída" → operation_type="sale"
+    - "transferência", "transfer" → operation_type="transfer"
+    - "devolução", "return" → operation_type="return"
     
     Returns: Count and detailed list of invoices with operation type, issuer, date, total value
     """
@@ -281,18 +281,14 @@ class DatabaseSearchTool(BaseTool):
         document_type: Optional[str] = None,
         operation_type: Optional[str] = None,
         issuer_cnpj: Optional[str] = None,
-        days_back: int = 3650,
+        days_back: int = 9999,
     ) -> str:
         """Search invoices in database."""
         try:
+            logger.info(f"DatabaseSearchTool called with: document_type={document_type}, operation_type={operation_type}, issuer_cnpj={issuer_cnpj}, days_back={days_back}")
+            
             # Create database connection (no state stored)
             db = DatabaseManager("sqlite:///fiscal_documents.db")
-            
-            # 🚨 CRITICAL FIX: Force days_back=9999 when filtering by operation_type
-            # This ensures we search ALL documents when user asks for counts by type or year
-            if operation_type is not None:
-                days_back = 9999
-                logger.info(f"🔧 Auto-forcing days_back=9999 because operation_type filter is active")
             
             # Search database with all filters
             invoices = db.search_invoices(
@@ -302,6 +298,8 @@ class DatabaseSearchTool(BaseTool):
                 days_back=days_back,
                 limit=100,
             )
+            
+            logger.info(f"DatabaseSearchTool found {len(invoices)} documents")
             
             if not invoices:
                 filter_desc = []
@@ -318,8 +316,8 @@ class DatabaseSearchTool(BaseTool):
 🔍 Nenhum documento encontrado com os filtros:
 {chr(10).join(f'- {f}' for f in filter_desc)}
 
-💡 Dica: Tente ampliar o período (days_back) ou remover filtros.
-Para ver TODOS os documentos, use days_back=9999.
+💡 Verifique se há documentos cadastrados no banco de dados.
+Para ver TODOS os documentos sem filtros, use days_back=9999 sem outros parâmetros.
 """
             
             # Count by operation type

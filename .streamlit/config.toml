@@ -1,8 +1,9 @@
 [theme]
-primaryColor = "#FF4B4B"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#262730"
+# Apple-inspired minimal theme
+primaryColor = "#007AFF"                # iOS blue accent
+backgroundColor = "#FFFFFF"              # Pure white background
+secondaryBackgroundColor = "#F5F5F7"     # Subtle Apple gray
+textColor = "#1D1D1F"                    # Near-black text
 font = "sans serif"
 
 [server]

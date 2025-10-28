@@ -339,14 +339,379 @@ class XMLParserTool:
         return items
 
     def _parse_cte(self, root: Element, xml_content: str) -> InvoiceModel:
-        """Parse CTe XML (stub implementation)."""
-        # TODO: Implement full CTe parser
-        raise NotImplementedError("CTe parsing not yet implemented")
+        """
+        Parse CTe (Conhecimento de Transporte Eletrônico) XML.
+        
+        CTe is a transport document - adapts to InvoiceModel structure:
+        - "items" will be empty (transport has no product items)
+        - total_products = transport service value
+        - issuer = transport company
+        - recipient = freight payer (can be sender, recipient, or third party)
+        """
+        # Find infCte element
+        inf_cte = root.find(".//infCte", self.NAMESPACES) or root.find(".//cte:infCte", self.NAMESPACES)
+        if inf_cte is None:
+            raise ValueError("Missing infCte element in CTe XML")
+        
+        # Extract document key
+        document_key = inf_cte.get("Id", "").replace("CTe", "")
+        
+        # IDE section (identification)
+        ide = inf_cte.find(".//ide", self.NAMESPACES) or inf_cte.find(".//cte:ide", self.NAMESPACES)
+        if ide is None:
+            raise ValueError("Missing ide element in CTe XML")
+        
+        document_number = self._get_text(ide, "nCT")
+        series = self._get_text(ide, "serie")
+        issue_date_str = self._get_text(ide, "dhEmi")
+        
+        # Parse issue date
+        from datetime import datetime
+        issue_date = datetime.fromisoformat(issue_date_str.replace("Z", "+00:00"))
+        
+        # Emit section (transport company - issuer)
+        emit = inf_cte.find(".//emit", self.NAMESPACES) or inf_cte.find(".//cte:emit", self.NAMESPACES)
+        if emit is None:
+            raise ValueError("Missing emit element in CTe XML")
+        
+        issuer_cnpj = self._get_text(emit, "CNPJ")
+        issuer_name = self._get_text(emit, "xNome")
+        issuer_ie = self._get_text(emit, "IE")
+        
+        # Extract issuer address
+        ender_emit = emit.find(".//enderEmit", self.NAMESPACES) or emit.find(".//cte:enderEmit", self.NAMESPACES)
+        issuer_uf = None
+        issuer_municipio = None
+        issuer_cep = None
+        if ender_emit is not None:
+            issuer_uf = self._get_text(ender_emit, "UF")
+            issuer_municipio = self._get_text(ender_emit, "xMun")
+            issuer_cep = self._get_text(ender_emit, "CEP")
+        
+        # Recipient (freight payer - can be rem/dest/exped/receb)
+        # Priority: try to get dest (recipient), then rem (sender)
+        recipient_cnpj_cpf = None
+        recipient_name = None
+        recipient_uf = None
+        recipient_municipio = None
+        recipient_cep = None
+        recipient_ie = None
+        
+        # Try dest first
+        dest = inf_cte.find(".//dest", self.NAMESPACES) or inf_cte.find(".//cte:dest", self.NAMESPACES)
+        if dest is None:
+            # Try rem (sender) as fallback
+            dest = inf_cte.find(".//rem", self.NAMESPACES) or inf_cte.find(".//cte:rem", self.NAMESPACES)
+        
+        if dest is not None:
+            recipient_cnpj_cpf = self._get_text(dest, "CNPJ") or self._get_text(dest, "CPF")
+            recipient_name = self._get_text(dest, "xNome")
+            recipient_ie = self._get_text(dest, "IE")
+            
+            # Extract recipient address
+            ender_dest = dest.find(".//enderDest", self.NAMESPACES) or dest.find(".//cte:enderDest", self.NAMESPACES)
+            if ender_dest is None:
+                ender_dest = dest.find(".//enderReme", self.NAMESPACES) or dest.find(".//cte:enderReme", self.NAMESPACES)
+            
+            if ender_dest is not None:
+                recipient_uf = self._get_text(ender_dest, "UF")
+                recipient_municipio = self._get_text(ender_dest, "xMun")
+                recipient_cep = self._get_text(ender_dest, "CEP")
+        
+        # vPrest section (transport service value)
+        v_prest = inf_cte.find(".//vPrest", self.NAMESPACES) or inf_cte.find(".//cte:vPrest", self.NAMESPACES)
+        if v_prest is None:
+            raise ValueError("Missing vPrest element in CTe XML")
+        
+        total_invoice = Decimal(self._get_text(v_prest, "vTPrest") or "0")
+        total_products = total_invoice  # Transport service value
+        
+        # Extract tax values
+        icms_total = Decimal(self._get_text(v_prest, "vICMS") or "0")
+        
+        # Imp section (taxes) - optional
+        imp = inf_cte.find(".//imp", self.NAMESPACES) or inf_cte.find(".//cte:imp", self.NAMESPACES)
+        if imp is not None:
+            icms_elem = imp.find(".//ICMS", self.NAMESPACES) or imp.find(".//cte:ICMS", self.NAMESPACES)
+            if icms_elem is not None:
+                # ICMS can have variants (ICMS00, ICMS20, ICMS45, ICMS90, ICMSSN)
+                for child in icms_elem:
+                    icms_val = self._get_text(child, "vICMS")
+                    if icms_val:
+                        icms_total = Decimal(icms_val)
+                        break
+        
+        total_taxes = icms_total  # CTe typically only has ICMS
+        
+        # Build tax details
+        taxes = TaxDetails(
+            icms=icms_total,
+            ipi=Decimal("0"),
+            pis=Decimal("0"),
+            cofins=Decimal("0"),
+        )
+        
+        # Extract transport-specific fields
+        # Modal de transporte
+        modal = self._get_text(ide, "modal")
+        
+        # RNTRC (Registro Nacional de Transportadores)
+        rntrc = None
+        rodo = None
+        inf_modal = inf_cte.find(".//infModal", self.NAMESPACES) or inf_cte.find(".//cte:infModal", self.NAMESPACES)
+        if inf_modal is not None:
+            rodo = inf_modal.find(".//rodo", self.NAMESPACES) or inf_modal.find(".//cte:rodo", self.NAMESPACES)
+            if rodo is not None:
+                inf_antt = rodo.find(".//infANTT", self.NAMESPACES) or rodo.find(".//cte:infANTT", self.NAMESPACES)
+                if inf_antt is not None:
+                    rntrc = self._get_text(inf_antt, "RNTRC")
+        
+        # Placa do veículo
+        vehicle_plate = None
+        vehicle_uf = None
+        if rodo is not None:
+            veic_tracicao = rodo.find(".//veicTracao", self.NAMESPACES) or rodo.find(".//cte:veicTracao", self.NAMESPACES)
+            if veic_tracicao is not None:
+                vehicle_plate = self._get_text(veic_tracicao, "placa")
+                vehicle_uf = self._get_text(veic_tracicao, "UF")
+        
+        # Tipo de tomador de serviço
+        service_taker_type = self._get_text(ide, "toma")
+        
+        # Tipo de serviço/frete
+        freight_type = self._get_text(ide, "tpServ")
+        
+        # Informações da carga
+        cargo_weight = None
+        cargo_weight_net = None
+        cargo_volume = None
+        inf_carga = inf_cte.find(".//infCarga", self.NAMESPACES) or inf_cte.find(".//cte:infCarga", self.NAMESPACES)
+        if inf_carga is not None:
+            peso_bruto = self._get_text(inf_carga, "vCarga")
+            if peso_bruto:
+                cargo_weight = Decimal(peso_bruto)
+        
+        # Valor do seguro
+        insurance_value = None
+        v_prest_seg = self._get_text(v_prest, "vRec") or self._get_text(v_prest, "vSeg")
+        if v_prest_seg:
+            insurance_value = Decimal(v_prest_seg)
+        
+        # Tipo de emissão
+        emission_type = self._get_text(ide, "tpEmis")
+        
+        # Carga perigosa
+        dangerous_cargo = False
+        inf_carga_peri = inf_cte.find(".//infCargaPeri", self.NAMESPACES) or inf_cte.find(".//cte:infCargaPeri", self.NAMESPACES)
+        if inf_carga_peri is not None:
+            dangerous_cargo = True
+        
+        return InvoiceModel(
+            document_type=DocumentType.CTE,
+            document_key=document_key,
+            document_number=document_number,
+            series=series,
+            issue_date=issue_date,
+            issuer_cnpj=issuer_cnpj,
+            issuer_name=issuer_name,
+            recipient_cnpj_cpf=recipient_cnpj_cpf,
+            recipient_name=recipient_name,
+            issuer_uf=issuer_uf,
+            recipient_uf=recipient_uf,
+            issuer_municipio=issuer_municipio,
+            recipient_municipio=recipient_municipio,
+            issuer_cep=issuer_cep,
+            recipient_cep=recipient_cep,
+            issuer_ie=issuer_ie,
+            recipient_ie=recipient_ie,
+            tax_regime=None,  # CTe doesn't have CRT
+            total_products=total_products,
+            total_taxes=total_taxes,
+            total_invoice=total_invoice,
+            discount=Decimal("0"),
+            other_expenses=Decimal("0"),
+            items=[],  # CTe has no product items
+            taxes=taxes,
+            # Transport-specific fields
+            modal=modal,
+            rntrc=rntrc,
+            vehicle_plate=vehicle_plate,
+            vehicle_uf=vehicle_uf,
+            service_taker_type=service_taker_type,
+            freight_value=total_products,  # Same as total_products for CTe
+            freight_type=freight_type,
+            cargo_weight=cargo_weight,
+            cargo_weight_net=cargo_weight_net,
+            cargo_volume=cargo_volume,
+            insurance_value=insurance_value,
+            emission_type=emission_type,
+            dangerous_cargo=dangerous_cargo,
+            raw_xml=xml_content,
+        )
 
     def _parse_mdfe(self, root: Element, xml_content: str) -> InvoiceModel:
-        """Parse MDFe XML (stub implementation)."""
-        # TODO: Implement full MDFe parser
-        raise NotImplementedError("MDFe parsing not yet implemented")
+        """
+        Parse MDFe (Manifesto Eletrônico de Documentos Fiscais) XML.
+        
+        MDFe is a manifest document - adapts to InvoiceModel structure:
+        - "items" will be empty (manifest doesn't have product items)
+        - total_products/invoice = 0 (manifest doesn't have monetary value)
+        - issuer = transport company
+        - recipient = first destination (if available)
+        """
+        # Find infMDFe element
+        inf_mdfe = root.find(".//infMDFe", self.NAMESPACES) or root.find(".//mdfe:infMDFe", self.NAMESPACES)
+        if inf_mdfe is None:
+            raise ValueError("Missing infMDFe element in MDFe XML")
+        
+        # Extract document key
+        document_key = inf_mdfe.get("Id", "").replace("MDFe", "")
+        
+        # IDE section (identification)
+        ide = inf_mdfe.find(".//ide", self.NAMESPACES) or inf_mdfe.find(".//mdfe:ide", self.NAMESPACES)
+        if ide is None:
+            raise ValueError("Missing ide element in MDFe XML")
+        
+        document_number = self._get_text(ide, "nMDF")
+        series = self._get_text(ide, "serie")
+        issue_date_str = self._get_text(ide, "dhEmi")
+        
+        # Parse issue date
+        from datetime import datetime
+        issue_date = datetime.fromisoformat(issue_date_str.replace("Z", "+00:00"))
+        
+        # Emit section (transport company - issuer)
+        emit = inf_mdfe.find(".//emit", self.NAMESPACES) or inf_mdfe.find(".//mdfe:emit", self.NAMESPACES)
+        if emit is None:
+            raise ValueError("Missing emit element in MDFe XML")
+        
+        issuer_cnpj = self._get_text(emit, "CNPJ")
+        issuer_name = self._get_text(emit, "xNome")
+        issuer_ie = self._get_text(emit, "IE")
+        
+        # Extract issuer address
+        ender_emit = emit.find(".//enderEmit", self.NAMESPACES) or emit.find(".//mdfe:enderEmit", self.NAMESPACES)
+        issuer_uf = None
+        issuer_municipio = None
+        issuer_cep = None
+        if ender_emit is not None:
+            issuer_uf = self._get_text(ender_emit, "UF")
+            issuer_municipio = self._get_text(ender_emit, "xMun")
+            issuer_cep = self._get_text(ender_emit, "CEP")
+        
+        # Recipient (first destination UF)
+        # MDFe doesn't have a traditional recipient, get from first infPercurso/infMunCarrega
+        recipient_uf = None
+        recipient_municipio = None
+        
+        # Try to get from infPercurso (route)
+        inf_percurso = inf_mdfe.find(".//infPercurso", self.NAMESPACES) or inf_mdfe.find(".//mdfe:infPercurso", self.NAMESPACES)
+        if inf_percurso is not None:
+            recipient_uf = self._get_text(inf_percurso, "UFPer")
+        
+        # If not found, try infMunCarrega (loading municipality)
+        if not recipient_uf:
+            inf_mun_carrega = inf_mdfe.find(".//infMunCarrega", self.NAMESPACES) or inf_mdfe.find(".//mdfe:infMunCarrega", self.NAMESPACES)
+            if inf_mun_carrega is not None:
+                recipient_municipio = self._get_text(inf_mun_carrega, "xMunCarrega")
+        
+        # MDFe doesn't have monetary values (it's just a manifest)
+        total_products = Decimal("0")
+        total_taxes = Decimal("0")
+        total_invoice = Decimal("0")
+        
+        # Build empty tax details
+        taxes = TaxDetails(
+            icms=Decimal("0"),
+            ipi=Decimal("0"),
+            pis=Decimal("0"),
+            cofins=Decimal("0"),
+        )
+        
+        # Extract transport-specific fields for MDFe
+        # Modal de transporte
+        modal = self._get_text(ide, "modal")
+        
+        # RNTRC
+        rntrc = None
+        rodo = None
+        inf_modal = inf_mdfe.find(".//infModal", self.NAMESPACES) or inf_mdfe.find(".//mdfe:infModal", self.NAMESPACES)
+        if inf_modal is not None:
+            rodo = inf_modal.find(".//rodo", self.NAMESPACES) or inf_modal.find(".//mdfe:rodo", self.NAMESPACES)
+            if rodo is not None:
+                inf_antt = rodo.find(".//infANTT", self.NAMESPACES) or rodo.find(".//mdfe:infANTT", self.NAMESPACES)
+                if inf_antt is not None:
+                    rntrc = self._get_text(inf_antt, "RNTRC")
+        
+        # Placa do veículo de tração
+        vehicle_plate = None
+        vehicle_uf = None
+        if rodo is not None:
+            veic_tracao = rodo.find(".//veicTracao", self.NAMESPACES) or rodo.find(".//mdfe:veicTracao", self.NAMESPACES)
+            if veic_tracao is not None:
+                vehicle_plate = self._get_text(veic_tracao, "placa")
+                vehicle_uf = self._get_text(veic_tracao, "UF")
+        
+        # Percurso (route UFs)
+        route_ufs = []
+        for perc in inf_mdfe.findall(".//infPercurso", self.NAMESPACES):
+            uf = self._get_text(perc, "UFPer")
+            if uf and uf not in route_ufs:
+                route_ufs.append(uf)
+        # Fallback to namespace-qualified search
+        if not route_ufs:
+            for perc in inf_mdfe.findall(".//mdfe:infPercurso", self.NAMESPACES):
+                uf = self._get_text(perc, "UFPer")
+                if uf and uf not in route_ufs:
+                    route_ufs.append(uf)
+        
+        # Peso total da carga
+        cargo_weight = None
+        tot = inf_mdfe.find(".//tot", self.NAMESPACES) or inf_mdfe.find(".//mdfe:tot", self.NAMESPACES)
+        if tot is not None:
+            peso_bruto = self._get_text(tot, "qCarga")
+            if peso_bruto:
+                cargo_weight = Decimal(peso_bruto)
+        
+        # Tipo de emissão
+        emission_type = self._get_text(ide, "tpEmis")
+        
+        return InvoiceModel(
+            document_type=DocumentType.MDFE,
+            document_key=document_key,
+            document_number=document_number,
+            series=series,
+            issue_date=issue_date,
+            issuer_cnpj=issuer_cnpj,
+            issuer_name=issuer_name,
+            recipient_cnpj_cpf=None,  # MDFe doesn't have traditional recipient
+            recipient_name=None,
+            issuer_uf=issuer_uf,
+            recipient_uf=recipient_uf,
+            issuer_municipio=issuer_municipio,
+            recipient_municipio=recipient_municipio,
+            issuer_cep=issuer_cep,
+            recipient_cep=None,
+            issuer_ie=issuer_ie,
+            recipient_ie=None,
+            tax_regime=None,  # MDFe doesn't have CRT
+            total_products=total_products,
+            total_taxes=total_taxes,
+            total_invoice=total_invoice,
+            discount=Decimal("0"),
+            other_expenses=Decimal("0"),
+            items=[],  # MDFe has no product items
+            taxes=taxes,
+            # Transport-specific fields
+            modal=modal,
+            rntrc=rntrc,
+            vehicle_plate=vehicle_plate,
+            vehicle_uf=vehicle_uf,
+            route_ufs=route_ufs,
+            cargo_weight=cargo_weight,
+            emission_type=emission_type,
+            raw_xml=xml_content,
+        )
 
     def _get_text(self, element: Element, tag: str) -> str:
         """Safely extract text from XML element."""

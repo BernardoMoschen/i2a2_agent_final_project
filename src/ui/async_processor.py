@@ -93,6 +93,11 @@ class AsyncProcessor:
             "processed": 0,
             "successful": 0,
             "failed": 0,
+            # Extended batch progress metrics
+            "discovered": total_xmls,
+            "parsed": 0,
+            "validated": 0,
+            "saved": 0,
             "errors": [],
             "results": [],
             "started_at": datetime.now(),
@@ -120,7 +125,7 @@ class AsyncProcessor:
 
     def _process_batch(
         self, files: List, job_id: str, company_id: str, user_id: str
-    ):
+    ) -> None:
         """
         Process batch of files in parallel using ThreadPoolExecutor.
         
@@ -128,12 +133,14 @@ class AsyncProcessor:
         """
         import zipfile
         from io import BytesIO
-        
         from src.utils.file_processing import FileProcessor
+        from src.database.db import DatabaseManager
 
         logger.info(f"[{job_id}] Starting batch processing with {self.max_workers} workers")
 
-        processor = FileProcessor()
+        # Disable per-file DB writes; we'll persist later in batches for performance
+        processor = FileProcessor(save_to_db=False)
+        db = DatabaseManager()
 
         # Step 1: Read all files and extract ZIPs
         # This ensures ALL XMLs (from ZIPs + standalone) are processed in parallel
@@ -232,6 +239,9 @@ class AsyncProcessor:
 
                         if result["status"] == "success":
                             job["successful"] += 1
+                            # Update fine-grained counters
+                            job["parsed"] += 1
+                            job["validated"] += 1
                             job["results"].append(result)
                             logger.info(f"[{job_id}] ✅ {filename} processed successfully")
                         else:
@@ -264,6 +274,60 @@ class AsyncProcessor:
                             except Exception as sync_e:
                                 logger.debug(f"Could not sync to session_state: {sync_e}")
 
+        # Persist successfully processed results in batches of 100
+        try:
+            with self.lock:
+                job = self.jobs.get(job_id)
+                results_snapshot = list(job["results"]) if job else []
+
+            # Build invoices_data tuples for batch saving
+            invoices_data = []
+            for r in results_snapshot:
+                try:
+                    invoices_data.append((r["invoice"], r.get("issues", []), r.get("classification")))
+                except Exception as e:
+                    logger.error(f"[{job_id}] Failed assembling batch tuple for {r.get('file')}: {e}")
+                    with self.lock:
+                        if job:
+                            job["failed"] += 1
+                            job["errors"].append({
+                                "file": r.get("file"),
+                                "index": r.get("index"),
+                                "error": f"Batch assembly error: {e}"
+                            })
+
+            # Chunked saves
+            chunk_size = 100
+            for i in range(0, len(invoices_data), chunk_size):
+                chunk = invoices_data[i:i+chunk_size]
+                try:
+                    saved = db.save_invoices_batch(chunk)
+                    with self.lock:
+                        job = self.jobs.get(job_id)
+                        if job:
+                            job["saved"] += len(saved)
+                            # Sync to session_state for UI updates
+                            try:
+                                if "processing_jobs" in st.session_state:
+                                    st.session_state.processing_jobs[job_id] = job
+                            except Exception as e:
+                                logger.debug(f"Could not sync during save: {e}")
+                except Exception as e:
+                    logger.error(f"[{job_id}] Error saving batch {i//chunk_size+1}: {e}")
+                    with self.lock:
+                        job = self.jobs.get(job_id)
+                        if job:
+                            # Attribute the error to files in this chunk
+                            for r in results_snapshot[i:i+chunk_size]:
+                                job["errors"].append({
+                                    "file": r.get("file"),
+                                    "index": r.get("index"),
+                                    "error": f"DB save error: {e}"
+                                })
+                            # Consider these as failed saves but don't change parsed/validated
+        except Exception as e:
+            logger.error(f"[{job_id}] Unexpected error during batch save: {e}")
+
         # Mark job as completed
         with self.lock:
             job = self.jobs.get(job_id)
@@ -281,7 +345,7 @@ class AsyncProcessor:
                 
                 logger.info(
                     f"[{job_id}] ✅ Batch completed in {elapsed:.1f}s: "
-                    f"{job['successful']}/{job['total']} successful"
+                    f"{job['successful']}/{job['total']} successful, {job['saved']} saved"
                 )
 
     def _process_single_file(

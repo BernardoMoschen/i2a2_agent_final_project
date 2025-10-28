@@ -25,7 +25,7 @@ def render_live_progress(job_id: str, placeholder):
     """
     processor = AsyncProcessor()
     
-    max_iterations = 60  # Máximo 60 iterações (3 min com sleep de 3s)
+    max_iterations = 180  # ~3 min com sleep de 1s
     iteration = 0
     
     while iteration < max_iterations:
@@ -40,23 +40,24 @@ def render_live_progress(job_id: str, placeholder):
         
         # Renderizar progresso no placeholder (sem recarregar página)
         with placeholder.container():
-            # Progress bar
-            progress = job["processed"] / job["total"] if job["total"] > 0 else 0
-            st.progress(progress, text=f"{job['processed']}/{job['total']} arquivos processados")
+            # Use 'saved' as main progress to reflect DB persistence
+            progress = job.get("saved", 0) / job["total"] if job["total"] > 0 else 0
+            st.progress(progress, text=f"{job.get('saved', 0)}/{job['total']} salvos no banco")
             
-            # Metrics
-            col1, col2, col3, col4 = st.columns(4)
+            # Extended metrics grid
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
             
             with col1:
-                st.metric("📦 Total", job["total"])
-            
+                st.metric("� Descobertos", job.get("discovered", job["total"]))
             with col2:
-                st.metric("⚙️ Processados", job["processed"])
-            
+                st.metric("🧩 Parseados", job.get("parsed", 0))
             with col3:
-                st.metric("✅ Sucesso", job["successful"])
-            
+                st.metric("✅ Validados", job.get("validated", 0))
             with col4:
+                st.metric("💾 Salvos", job.get("saved", 0))
+            with col5:
+                st.metric("⚙️ Processados", job["processed"])
+            with col6:
                 st.metric("❌ Falhas", job["failed"])
             
             # Time estimate
@@ -66,8 +67,8 @@ def render_live_progress(job_id: str, placeholder):
                 remaining = (job["total"] - job["processed"]) * avg_time
                 st.caption(f"⏱️ Tempo restante estimado: ~{remaining:.0f}s")
                 
-                # Atualizar a cada 3 segundos
-                time.sleep(3)
+                # Atualizar a cada 1 segundo
+                time.sleep(1)
                 iteration += 1
             else:
                 # Processamento concluído ou cancelado
