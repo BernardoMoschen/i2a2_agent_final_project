@@ -13,27 +13,34 @@ Implementamos um sistema completo de validações específicas para documentos d
 Funções de validação determinísticas para campos específicos de CTe/MDFe:
 
 #### Validações de Modal
+
 - `validate_modal()` — valida códigos 01-06 (Rodoviário, Aéreo, Aquaviário, Ferroviário, Dutoviário, Multimodal)
 - `get_modal_description()` — retorna descrição human-readable
 
-####  Validações de RNTRC (Registro Nacional de Transportadores)
+#### Validações de RNTRC (Registro Nacional de Transportadores)
+
 - `validate_rntrc_format()` — valida formato de 8 dígitos
 - `ANTTValidator.validate_rntrc_active()` — validação online com ANTT (placeholder implementado, pronto para integração futura)
 
 #### Validações de Veículo
+
 - `validate_vehicle_plate()` — valida placas no formato antigo (ABC1234) e Mercosul (ABC1D23)
 
 #### Validações de CFOP
+
 - `validate_cfop_for_transport()` — valida CFOPs específicos de transporte (1351-1359, 2351-2359, 5351-5359, 6351-6359)
 
 #### Validações de UF/Rota
+
 - `validate_uf()` — valida código de estado brasileiro
 - `validate_uf_route()` — valida sequência de UFs do percurso (sem duplicados, estados válidos)
 
 #### Validações de Peso
+
 - `validate_weight()` — valida peso > 0
 
 #### Validações Online (Preparadas para Integração)
+
 - `SEFAZTransportValidator.validate_cte_key_online()` — consulta SEFAZ para verificar autorização do CTe
 - `SEFAZTransportValidator.validate_mdfe_key_online()` — consulta SEFAZ para verificar autorização do MDFe
 
@@ -53,23 +60,23 @@ Todas as validações baseadas em `items` agora pulam CTe/MDFe (que não têm it
 
 #### **Novas Validações Específicas de CTe** (VAL050-VAL059)
 
-| Código | Severidade | Descrição | Campo |
-|--------|-----------|-----------|-------|
-| **VAL050** | ERROR | Modal de transporte inválido | `modal` |
-| **VAL051** | WARNING | RNTRC formato inválido (deve ter 8 dígitos) | `rntrc` |
-| **VAL052** | ERROR | CFOP não válido para transporte | `cfop` |
-| **VAL053** | ERROR | Valor do serviço deve ser > 0 | `total_invoice` |
-| **VAL054** | WARNING | Placa de veículo formato inválido | `vehicle_plate` |
-| **VAL055** | ERROR | UF origem/destino inválida | `issuer_uf, recipient_uf` |
+| Código     | Severidade | Descrição                                   | Campo                     |
+| ---------- | ---------- | ------------------------------------------- | ------------------------- |
+| **VAL050** | ERROR      | Modal de transporte inválido                | `modal`                   |
+| **VAL051** | WARNING    | RNTRC formato inválido (deve ter 8 dígitos) | `rntrc`                   |
+| **VAL052** | ERROR      | CFOP não válido para transporte             | `cfop`                    |
+| **VAL053** | ERROR      | Valor do serviço deve ser > 0               | `total_invoice`           |
+| **VAL054** | WARNING    | Placa de veículo formato inválido           | `vehicle_plate`           |
+| **VAL055** | ERROR      | UF origem/destino inválida                  | `issuer_uf, recipient_uf` |
 
 #### **Novas Validações Específicas de MDFe** (VAL060-VAL069)
 
-| Código | Severidade | Descrição | Campo |
-|--------|-----------|-----------|-------|
-| **VAL060** | ERROR | Modal inválido (MDFe aceita 01-04 apenas) | `modal` |
-| **VAL061** | WARNING | Percurso UF duplicado ou inválido | `route_ufs` |
-| **VAL062** | WARNING | Placa de veículo formato inválido | `vehicle_plate` |
-| **VAL063** | WARNING | Peso total deve ser > 0 | `total_weight` |
+| Código     | Severidade | Descrição                                 | Campo           |
+| ---------- | ---------- | ----------------------------------------- | --------------- |
+| **VAL060** | ERROR      | Modal inválido (MDFe aceita 01-04 apenas) | `modal`         |
+| **VAL061** | WARNING    | Percurso UF duplicado ou inválido         | `route_ufs`     |
+| **VAL062** | WARNING    | Placa de veículo formato inválido         | `vehicle_plate` |
+| **VAL063** | WARNING    | Peso total deve ser > 0                   | `total_weight`  |
 
 #### **Métodos Auxiliares Implementados**
 
@@ -93,6 +100,7 @@ Métodos privados na classe `FiscalValidatorTool` para extrair dados do XML brut
 **19 testes implementados** (todos passando ✅):
 
 ##### Testes CTe (8 testes)
+
 - ✅ CTe válido passa todas as validações
 - ✅ Modal inválido (99) falha VAL050
 - ✅ RNTRC inválido (123) falha VAL051
@@ -103,6 +111,7 @@ Métodos privados na classe `FiscalValidatorTool` para extrair dados do XML brut
 - ✅ CTe pula validações de items (VAL005-VAL008)
 
 ##### Testes MDFe (6 testes)
+
 - ✅ MDFe válido passa todas as validações
 - ✅ Modal inválido (05-Dutoviário) falha VAL060
 - ✅ UF duplicada no percurso falha VAL061
@@ -111,6 +120,7 @@ Métodos privados na classe `FiscalValidatorTool` para extrair dados do XML brut
 - ✅ MDFe pula validações de items (VAL005-VAL008)
 
 ##### Testes de Funções Auxiliares (5 testes)
+
 - ✅ `validate_modal()` — aceita 01-06, rejeita 99
 - ✅ `validate_rntrc_format()` — aceita 8 dígitos, rejeita outros formatos
 - ✅ `validate_vehicle_plate()` — aceita ABC1234 e ABC1D23, rejeita formatos inválidos
@@ -173,28 +183,28 @@ if errors:
 
 ### CTe
 
-| Aspecto | Validação | Status |
-|---------|-----------|--------|
-| Modal de transporte | ✅ VAL050 | Implementado |
-| RNTRC | ✅ VAL051 | Implementado |
-| CFOP específico | ✅ VAL052 | Implementado |
-| Valor do serviço | ✅ VAL053 | Implementado |
-| Placa de veículo | ✅ VAL054 | Implementado |
-| UFs origem/destino | ✅ VAL055 | Implementado |
-| ICMS cálculo | 🔄 Adaptado de VAL014 | Funciona |
-| Tomador serviço | 🔜 Futuro (VAL056) | Planejado |
-| Percurso detalhado | 🔜 Futuro (VAL057) | Planejado |
+| Aspecto             | Validação             | Status       |
+| ------------------- | --------------------- | ------------ |
+| Modal de transporte | ✅ VAL050             | Implementado |
+| RNTRC               | ✅ VAL051             | Implementado |
+| CFOP específico     | ✅ VAL052             | Implementado |
+| Valor do serviço    | ✅ VAL053             | Implementado |
+| Placa de veículo    | ✅ VAL054             | Implementado |
+| UFs origem/destino  | ✅ VAL055             | Implementado |
+| ICMS cálculo        | 🔄 Adaptado de VAL014 | Funciona     |
+| Tomador serviço     | 🔜 Futuro (VAL056)    | Planejado    |
+| Percurso detalhado  | 🔜 Futuro (VAL057)    | Planejado    |
 
 ### MDFe
 
-| Aspecto | Validação | Status |
-|---------|-----------|--------|
-| Modal (01-04) | ✅ VAL060 | Implementado |
-| Percurso UF | ✅ VAL061 | Implementado |
-| Placa principal | ✅ VAL062 | Implementado |
-| Peso total | ✅ VAL063 | Implementado |
-| Docs referenciados | 🔜 Futuro (VAL064) | Planejado |
-| Carregamento/Descarregamento | 🔜 Futuro (VAL065-066) | Planejado |
+| Aspecto                      | Validação              | Status       |
+| ---------------------------- | ---------------------- | ------------ |
+| Modal (01-04)                | ✅ VAL060              | Implementado |
+| Percurso UF                  | ✅ VAL061              | Implementado |
+| Placa principal              | ✅ VAL062              | Implementado |
+| Peso total                   | ✅ VAL063              | Implementado |
+| Docs referenciados           | 🔜 Futuro (VAL064)     | Planejado    |
+| Carregamento/Descarregamento | 🔜 Futuro (VAL065-066) | Planejado    |
 
 ---
 
@@ -210,6 +220,7 @@ is_active = validator.validate_rntrc_active("12345678")
 ```
 
 **Status**: Placeholder implementado. Para ativar:
+
 1. Obter credenciais ANTT API
 2. Implementar chamada REST no método `validate_rntrc_active()`
 3. Tratamento de erros e cache já está pronto
@@ -225,6 +236,7 @@ is_valid_mdfe = validator.validate_mdfe_key_online(access_key)
 ```
 
 **Status**: Placeholder implementado. Para ativar:
+
 1. Integrar com Portal Nacional CTe/MDFe
 2. Implementar SOAP/REST client
 3. Cache e tratamento de erros já estão prontos
@@ -234,12 +246,14 @@ is_valid_mdfe = validator.validate_mdfe_key_online(access_key)
 ## 🚀 Próximos Passos
 
 ### Melhorias Imediatas
+
 1. ✅ ~~Validações específicas CTe/MDFe~~ **FEITO**
 2. 🔜 Extender `InvoiceModel` com campos transport-específicos (cargo, vehicle, rntrc)
 3. 🔜 Adicionar validações adicionais (VAL056-VAL059, VAL064-VAL069)
 4. 🔜 Implementar integrações online (ANTT, SEFAZ)
 
 ### Integração com Sistema
+
 - ✅ CTe/MDFe já são **parseados** corretamente
 - ✅ CTe/MDFe já são **validados** com regras específicas
 - ✅ CTe/MDFe já são **salvos no banco** (DatabaseManager)
@@ -253,16 +267,19 @@ is_valid_mdfe = validator.validate_mdfe_key_online(access_key)
 ## 📝 Arquivos Modificados/Criados
 
 ### Novos Arquivos
+
 - ✅ `src/services/transport_validators.py` (448 linhas) — validadores de transporte
 - ✅ `tests/test_cte_mdfe_validations.py` (445 linhas) — 19 testes
 
 ### Arquivos Modificados
+
 - ✅ `src/tools/fiscal_validator.py` — adicionadas 14 regras + 8 métodos auxiliares
   - VAL005-VAL009: tornadas condicionais
   - VAL050-VAL055: validações CTe
   - VAL060-VAL063: validações MDFe
 
 ### Compatibilidade
+
 - ✅ Todos os testes existentes continuam passando
 - ✅ Parsers CTe/MDFe já existentes continuam funcionando
 - ✅ Banco de dados: sem alterações de schema necessárias
