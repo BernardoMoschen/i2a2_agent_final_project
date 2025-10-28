@@ -559,6 +559,10 @@ class DatabaseManager:
         invoice_type: Optional[str] = None,  # Alias for document_type
         operation_type: Optional[str] = None,  # Filter by classification
         issuer_cnpj: Optional[str] = None,
+        recipient_cnpj: Optional[str] = None,
+        modal: Optional[str] = None,
+        cost_center: Optional[str] = None,
+        min_confidence: Optional[float] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         days_back: Optional[int] = None,
@@ -573,6 +577,10 @@ class DatabaseManager:
             invoice_type: Alias for document_type
             operation_type: Filter by operation type (purchase, sale, transfer, return)
             issuer_cnpj: Filter by issuer CNPJ (contains search)
+            recipient_cnpj: Filter by recipient CNPJ/CPF (contains search)
+            modal: Filter by transport modal (CTe/MDFe)
+            cost_center: Filter by cost center (classification)
+            min_confidence: Minimum classification confidence
             start_date: Filter by issue date >= start_date
             end_date: Filter by issue date <= end_date
             days_back: Filter by documents from last N days
@@ -602,6 +610,18 @@ class DatabaseManager:
             # CNPJ contains search
             if issuer_cnpj:
                 statement = statement.where(InvoiceDB.issuer_cnpj.contains(issuer_cnpj))
+            if recipient_cnpj:
+                statement = statement.where(InvoiceDB.recipient_cnpj_cpf.contains(recipient_cnpj))
+
+            # Transport modal filter (exact match)
+            if modal:
+                statement = statement.where(InvoiceDB.modal == modal)
+
+            # Cost center and confidence filters
+            if cost_center:
+                statement = statement.where(InvoiceDB.cost_center == cost_center)
+            if min_confidence is not None:
+                statement = statement.where(InvoiceDB.classification_confidence >= min_confidence)
             
             # Date filters
             if days_back:
@@ -630,6 +650,57 @@ class DatabaseManager:
                 _ = inv.issues
             
             return invoices
+
+    def count_invoices(
+        self,
+        document_type: Optional[str] = None,
+        invoice_type: Optional[str] = None,
+        operation_type: Optional[str] = None,
+        issuer_cnpj: Optional[str] = None,
+        recipient_cnpj: Optional[str] = None,
+        modal: Optional[str] = None,
+        cost_center: Optional[str] = None,
+        min_confidence: Optional[float] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        days_back: Optional[int] = None,
+    ) -> int:
+        """Return total count for given filters (used for pagination)."""
+        from sqlalchemy import func
+
+        with Session(self.engine) as session:
+            statement = select(func.count()).select_from(InvoiceDB)
+
+            # Handle both document_type and invoice_type (alias)
+            doc_type = document_type or invoice_type
+            if doc_type:
+                statement = statement.where(InvoiceDB.document_type == doc_type)
+
+            if operation_type:
+                statement = statement.where(InvoiceDB.operation_type == operation_type)
+
+            if issuer_cnpj:
+                statement = statement.where(InvoiceDB.issuer_cnpj.contains(issuer_cnpj))
+            if recipient_cnpj:
+                statement = statement.where(InvoiceDB.recipient_cnpj_cpf.contains(recipient_cnpj))
+
+            if modal:
+                statement = statement.where(InvoiceDB.modal == modal)
+
+            if cost_center:
+                statement = statement.where(InvoiceDB.cost_center == cost_center)
+            if min_confidence is not None:
+                statement = statement.where(InvoiceDB.classification_confidence >= min_confidence)
+
+            if days_back:
+                cutoff_date = datetime.now(UTC) - timedelta(days=days_back)
+                statement = statement.where(InvoiceDB.issue_date >= cutoff_date)
+            if start_date:
+                statement = statement.where(InvoiceDB.issue_date >= start_date)
+            if end_date:
+                statement = statement.where(InvoiceDB.issue_date <= end_date)
+
+            return session.exec(statement).one()
 
     def get_statistics(self) -> dict:
         """Get database statistics."""
