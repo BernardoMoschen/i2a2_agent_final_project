@@ -6,6 +6,9 @@ import streamlit as st
 
 logger = logging.getLogger(__name__)
 
+# Constants
+COST_PER_LLM_CALL = 0.001  # USD per API call (used for savings estimation)
+
 
 def render_cache_stats(db):
     """Render cache statistics in expander."""
@@ -39,7 +42,7 @@ def render_cache_stats(db):
             
             with col4:
                 avg_hits = stats["avg_hits_per_entry"]
-                cost_saved = stats["total_hits"] * 0.001  # Assuming $0.001 per LLM call
+                cost_saved = stats["total_hits"] * COST_PER_LLM_CALL
                 st.metric(
                     "💰 Economia Estimada",
                     f"${cost_saved:.2f}",
@@ -54,6 +57,6 @@ def render_cache_stats(db):
             else:
                 st.info("💡 Nenhuma classificação em cache ainda. Processe alguns documentos para popular o cache.")
                 
-        except Exception as e:
-            logger.error(f"Error rendering cache stats: {e}")
+        except (ValueError, KeyError, RuntimeError, OSError) as e:
+            logger.error(f"Error rendering cache stats: {e}", exc_info=True)
             st.error("Erro ao carregar estatísticas de cache")

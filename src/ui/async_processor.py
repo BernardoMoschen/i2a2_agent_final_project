@@ -125,7 +125,7 @@ class AsyncProcessor:
 
     def _process_batch(
         self, files: List, job_id: str, company_id: str, user_id: str
-    ):
+    ) -> None:
         """
         Process batch of files in parallel using ThreadPoolExecutor.
         

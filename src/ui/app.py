@@ -17,6 +17,9 @@ import src.database.db as database_db
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Constants
+COST_PER_LLM_CALL = 0.001  # USD per API call (used for savings estimation)
+
 st.set_page_config(
     page_title="Fiscal Document Agent",
     page_icon="📄",
@@ -292,7 +295,7 @@ def main() -> None:
                 st.metric("📈 Effectiveness", f"{cache_stats['cache_effectiveness']:.1f}%")
             with col4:
                 avg_hits = cache_stats["avg_hits_per_entry"]
-                cost_saved = cache_stats["total_hits"] * 0.001  # $0.001 per LLM call
+                cost_saved = cache_stats["total_hits"] * COST_PER_LLM_CALL
                 st.metric("💰 Savings", f"${cost_saved:.2f}")
 
             if cache_stats["total_entries"] > 0:
