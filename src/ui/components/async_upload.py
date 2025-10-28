@@ -205,6 +205,20 @@ def _show_job_results(job: dict):
                 st.error(
                     f"**{error['file']}** (índice {error['index']}): {error['error']}"
                 )
+            # Download CSV of errors
+            import io, csv
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            writer.writerow(["file", "index", "error"]) 
+            for e in job["errors"]:
+                writer.writerow([e.get("file"), e.get("index"), e.get("error")])
+            st.download_button(
+                label="⬇️ Baixar lista de erros (CSV)",
+                data=csv_buffer.getvalue(),
+                file_name=f"upload_errors_{job['started_at'].strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
         else:
             st.success("Nenhum erro encontrado! 🎉")
 
@@ -240,33 +254,25 @@ def render_job_progress(job_id: str):
         else:
             st.error(f"❌ Status: {status}")
 
-    # Progress bar
-    progress = job["processed"] / job["total"] if job["total"] > 0 else 0
-    st.progress(progress, text=f"{job['processed']}/{job['total']} arquivos processados")
+    # Progress bar (use saved/total to reflect persistence)
+    progress = job.get("saved", 0) / job["total"] if job["total"] > 0 else 0
+    st.progress(progress, text=f"{job.get('saved', 0)}/{job['total']} salvos no banco")
 
-    # Metrics
-    col1, col2, col3, col4 = st.columns(4)
+    # Extended Metrics
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
 
     with col1:
-        st.metric("📦 Total", job["total"])
-
+        st.metric("� Descobertos", job.get("discovered", job["total"]))
     with col2:
-        st.metric("⚙️ Processados", job["processed"])
-
+        st.metric("🧩 Parseados", job.get("parsed", 0))
     with col3:
-        st.metric(
-            "✅ Sucesso",
-            job["successful"],
-            delta=f"+{job['successful']}" if job["successful"] > 0 else None,
-        )
-
+        st.metric("✅ Validados", job.get("validated", 0))
     with col4:
-        st.metric(
-            "❌ Falhas",
-            job["failed"],
-            delta=f"+{job['failed']}" if job["failed"] > 0 else None,
-            delta_color="inverse",
-        )
+        st.metric("💾 Salvos", job.get("saved", 0))
+    with col5:
+        st.metric("⚙️ Processados", job["processed"])
+    with col6:
+        st.metric("❌ Falhas", job["failed"])
 
     # Time tracking
     elapsed = (datetime.now() - job["started_at"]).total_seconds()
@@ -281,10 +287,9 @@ def render_job_progress(job_id: str):
             f"⏱️ Decorrido: {elapsed:.1f}s | Restante: ~{remaining:.0f}s"
         )
 
-    # Auto-refresh while processing (com intervalo maior para reduzir flickering)
+    # Auto-refresh while processing (1s polling)
     if status == "processing":
-        # Atualizar a cada 3 segundos em vez de 1 (mais suave)
-        time.sleep(3)
+        time.sleep(1)
         st.rerun()
 
     # Results section (only when completed)
@@ -312,6 +317,20 @@ def render_job_progress(job_id: str):
                     st.error(
                         f"**{error['file']}** (índice {error['index']}): {error['error']}"
                     )
+                # Provide CSV download of errors
+                import io, csv
+                csv_buffer = io.StringIO()
+                writer = csv.writer(csv_buffer)
+                writer.writerow(["file", "index", "error"])
+                for e in job["errors"]:
+                    writer.writerow([e.get("file"), e.get("index"), e.get("error")])
+                st.download_button(
+                    label="⬇️ Baixar erros (CSV)",
+                    data=csv_buffer.getvalue(),
+                    file_name=f"upload_errors_{job_id[:8]}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
             else:
                 st.success("Nenhum erro encontrado! 🎉")
 
