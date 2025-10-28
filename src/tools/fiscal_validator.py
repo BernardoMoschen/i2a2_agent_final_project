@@ -1183,8 +1183,9 @@ class FiscalValidatorTool:
             # If found, it's a duplicate
             return len(existing) == 0
         
-        except Exception:
+        except (ValueError, KeyError, RuntimeError, OSError) as e:
             # If database check fails, skip validation (don't block processing)
+            logger.debug(f"Duplicate check failed (continuing): {e}")
             return True
     
     # ===== CTe/MDFe SPECIFIC VALIDATION HELPERS =====

@@ -2,7 +2,6 @@
 
 import logging
 import sys
-from datetime import datetime, timedelta
 from pathlib import Path
 
 # Add project root to path
@@ -12,7 +11,7 @@ sys.path.insert(0, str(project_root))
 import streamlit as st
 
 from src.agent.agent_core import create_agent
-from src.utils.file_processing import format_classification
+import src.database.db as database_db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +24,29 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Minimal, elegant styling (Apple-inspired)
+st.markdown(
+    """
+    <style>
+      /* Reduce default padding and roundness for a cleaner look */
+      .block-container {padding-top: 2rem; padding-bottom: 2rem;}
+      section[data-testid="stSidebar"] .stMarkdown h2 {margin-top: 0.5rem;}
+      h1, h2, h3, h4 { color: #1D1D1F; }
+      .metric-label { color: #6e6e73; font-size: 0.9rem; }
+      .metric-value { color: #1D1D1F; font-weight: 600; }
+      /* Subtle divider */
+      hr {border: none; border-top: 1px solid #e5e5e7; margin: 0.75rem 0;}
+      /* Buttons */
+      .stButton>button { border-radius: 10px; padding: 0.5rem 1rem; }
+      /* Reduce upload section spacing */
+      .uploadedFile { padding: 0.5rem; }
+      /* Fix scroll jumping */
+      html { scroll-behavior: smooth; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 def init_agent(api_key: str) -> None:
     """
@@ -32,6 +54,9 @@ def init_agent(api_key: str) -> None:
 
     Args:
         api_key: Google Gemini API key
+
+    Raises:
+        ValueError: If API key is invalid or agent initialization fails
     """
     if "agent" not in st.session_state or st.session_state.get("api_key") != api_key:
         try:
@@ -39,25 +64,53 @@ def init_agent(api_key: str) -> None:
             st.session_state.agent = create_agent(api_key=api_key, model_name="gemini-2.5-flash-lite")
             st.session_state.api_key = api_key
             logger.info("Agent initialized successfully")
-        except Exception as e:
+        except (ValueError, KeyError, RuntimeError) as e:
             logger.error(f"Failed to initialize agent: {e}", exc_info=True)
             st.error(f"❌ Erro ao inicializar agente: {e}")
             st.session_state.agent = None
 
 
+def get_cached_db(db_path: str) -> database_db.DatabaseManager:
+    """
+    Get or create cached database manager in session state.
+
+    Args:
+        db_path: Path to database file
+
+    Returns:
+        DatabaseManager instance cached in session state
+
+    This avoids creating new connections on every rerun.
+
+    Raises:
+        OSError: If database path is invalid or inaccessible
+        ValueError: If database initialization fails
+    """
+    db_key = f"db_manager_{db_path}"
+    if db_key not in st.session_state:
+        try:
+            st.session_state[db_key] = database_db.DatabaseManager(
+                database_url=f"sqlite:///{db_path}"
+            )
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.error(f"Failed to initialize database: {e}")
+            st.error(f"❌ Erro ao conectar ao banco de dados: {e}")
+            return None
+    return st.session_state[db_key]
+
+
 def main() -> None:
     """Main Streamlit application."""
     st.title("📄 Fiscal Document Agent")
-    st.markdown(
-        """
-        Automated processing, validation, classification, and archiving of
-        Brazilian fiscal documents.
-        """
-    )
+    st.caption("Elegant, focused workspace for Brazilian fiscal documents")
+
+    # Show connection status in header if needed
+    if st.session_state.get("agent"):
+        st.success("✅ Agent Ready", icon="🤖")
 
     # Sidebar for configuration
     with st.sidebar:
-        st.header("⚙️ Configuration")
+        st.header("⚙️ Settings")
 
         # API Key input
         api_key = st.text_input(
@@ -70,15 +123,14 @@ def main() -> None:
         if api_key:
             init_agent(api_key)
 
-        # Upload directory
-        st.subheader("📁 Storage Settings")
-        archive_dir = st.text_input("Archive Directory", value="./archives")
+        # Storage settings
+        st.subheader("📁 Storage")
         db_path = st.text_input("Database Path", value="./fiscal_documents.db")
 
         st.divider()
 
         # System status
-        st.subheader("🔌 System Status")
+        st.subheader("🔌 Status")
         if api_key and st.session_state.get("agent"):
             st.success("✅ Agent connected to Gemini")
         elif api_key:
@@ -86,32 +138,18 @@ def main() -> None:
         else:
             st.warning("⚠️ No API Key (limited mode)")
 
-        st.info(f"📦 Archive: {archive_dir}")
-        st.info(f"💾 Database: {db_path}")
+        st.caption(f"💾 Database: {db_path}")
 
-    # Main content area
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-        ["⚡ Upload", "📋 History", "💬 Chat", "📊 Validation", "📈 Reports", "📊 Statistics"]
+    # Native Streamlit tabs - no CSS complexity
+    tab_home, tab_documents, tab_reports, tab_statistics = st.tabs(
+        ["🏠 Home", "📄 Documents", "📈 Reports", "📊 Statistics"]
     )
 
-    with tab1:
-        # Async Upload Tab
-        from src.ui.components.async_upload import render_async_upload_tab
-        render_async_upload_tab()
-
-    with tab2:
-        # Initialize database
-        from src.database.db import DatabaseManager
-        from src.ui.components.documents_explorer import render_documents_explorer
-
-        database_url = f"sqlite:///{db_path}"
-        db = DatabaseManager(database_url=database_url)
-
-        render_documents_explorer(db)
-
-    with tab3:
-        st.header("Chat with Your Documents")
-        st.markdown("Ask questions about your fiscal documents using natural language.")
+    # ============= HOME TAB =============
+    with tab_home:
+        # Chat interface as primary interaction
+        st.header("💬 Chat with Your Documents")
+        st.caption("Ask in natural language. Portuguese or English. Minimal answers, clear actions.")
 
         # Initialize chat messages
         if "messages" not in st.session_state:
@@ -135,240 +173,139 @@ def main() -> None:
                     "⚠️ Por favor, configure sua chave API do Gemini na barra lateral "
                     "para usar o chat."
                 )
-                return
+            else:
+                # Add user message
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
 
-            # Add user message
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+                # Get agent response
+                with st.chat_message("assistant"):
+                    with st.spinner("🤔 Pensando..."):
+                        try:
+                            response = st.session_state.agent.chat(prompt)
+                            st.markdown(response)
+                            st.session_state.messages.append({"role": "assistant", "content": response})
+                        except (ValueError, KeyError, RuntimeError, TimeoutError) as e:
+                            error_msg = f"❌ Erro ao processar mensagem: {str(e)}"
+                            st.error(error_msg)
+                            logger.error(f"Chat error: {e}", exc_info=True)
 
-            # Get agent response
-            with st.chat_message("assistant"):
-                with st.spinner("🤔 Pensando..."):
-                    try:
-                        response = st.session_state.agent.chat(prompt)
-                        st.markdown(response)
-                        st.session_state.messages.append({"role": "assistant", "content": response})
-                    except Exception as e:
-                        error_msg = f"❌ Erro ao processar mensagem: {str(e)}"
-                        st.error(error_msg)
-                        logger.error(f"Chat error: {e}", exc_info=True)
+        # Quick Actions below chat
+        st.markdown("---")
+        st.markdown("#### Quick Actions")
+        st.caption("Navigate to key features")
 
-    with tab4:
-        st.header("Validation Results")
-        st.markdown("View detailed validation issues for processed documents.")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            if st.button("⬆️ Upload XMLs", use_container_width=True, type="secondary"):
+                st.switch_page("page_documents")
+        with c2:
+            if st.button("🔍 Search Documents", use_container_width=True, type="secondary"):
+                st.switch_page("page_documents")
+        with c3:
+            if st.button("📊 View Statistics", use_container_width=True, type="secondary"):
+                st.switch_page("page_statistics")
+        with c4:
+            if st.button("📈 Generate Report", use_container_width=True, type="secondary"):
+                st.switch_page("page_reports")
 
-        # Placeholder validation table
-        st.info("No documents processed yet. Upload and validate documents in the Upload tab.")
+    # ============= DOCUMENTS TAB =============
+    with tab_documents:
+        st.header("📄 Documents")
 
-        # Example structure
-        with st.expander("📋 Example Validation Report"):
-            st.markdown(
-                """
-            **Document**: NFe 35240112345678000190550010000000011234567890
+        # Upload Section - compact and collapsed by default
+        with st.expander("⬆️ Upload Fiscal Documents", expanded=False):
+            st.caption("Upload single XMLs, multiple files, or ZIP archives (NFe, NFCe, CTe, MDFe)")
+            from src.ui.components.async_upload import render_async_upload_tab
+            render_async_upload_tab()
 
-            **Validation Summary**:
-            - ✅ 8 checks passed
-            - ⚠️ 2 warnings
-            - ❌ 0 errors
+        # Explorer section - main focus
+        st.subheader("🔍 Browse & Search")
+        from src.ui.components.documents_explorer import render_documents_explorer
+        
+        db_docs = get_cached_db(db_path)
+        if db_docs:
+            render_documents_explorer(db_docs)
 
-            **Issues**:
-            1. **VAL003** (Warning): Sum of item totals does not match
-               total_products (tolerance: 0.02)
-               - Field: `total_products`
-               - Suggestion: Check for rounding errors or missing items
-
-            2. **VAL007** (Info): One or more items missing NCM code
-               - Field: `items[].ncm`
-               - Suggestion: NCM codes help with classification and tax reporting
-            """
-            )
-
-    with tab5:
+    # ============= REPORTS TAB =============
+    with tab_reports:
         # Reports Tab with full reporting functionality
         from src.ui.components.reports_tab import render_reports_tab
-        
-        # Convert file path to SQLite URL
-        database_url = f"sqlite:///{db_path}"
-        db_reports = DatabaseManager(database_url=database_url)
-        
-        render_reports_tab(db_reports)
 
-    with tab6:
-        st.header("📊 System Statistics")
-        
-        # Cache statistics
-        from src.database.db import DatabaseManager
-        from src.ui.components.cache_stats import render_cache_stats
-        
+        db_reports = get_cached_db(db_path)
+        if db_reports:
+            render_reports_tab(db_reports)
+
+    # ============= STATISTICS TAB =============
+    with tab_statistics:
+        st.header("📊 Statistics & Overview")
+
+        # Database statistics
         try:
-            db = DatabaseManager()
-            
-            st.subheader("🎯 Classification Cache")
-            st.markdown("Intelligent system that reduces LLM costs by reusing classifications from similar documents.")
-            
-            # Render cache stats (expanded by default in this tab)
-            stats = db.get_cache_statistics()
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric(
-                    "🗄️ Cache Entries",
-                    stats["total_entries"],
-                    help="Unique classifications stored"
-                )
-            
-            with col2:
-                st.metric(
-                    "🎯 Cache Hits",
-                    stats["total_hits"],
-                    help="Times cache was used instead of calling LLM"
-                )
-            
-            with col3:
-                st.metric(
-                    "📈 Effectiveness",
-                    f"{stats['cache_effectiveness']:.1f}%",
-                    help="Percentage of classifications that came from cache"
-                )
-            
-            with col4:
-                avg_hits = stats["avg_hits_per_entry"]
-                cost_saved = stats["total_hits"] * 0.001  # Assuming $0.001 per LLM call
-                st.metric(
-                    "💰 Estimated Savings",
-                    f"${cost_saved:.2f}",
-                    help=f"Savings on LLM calls (avg {avg_hits:.1f} hits/entry)"
-                )
-            
-            if stats["total_entries"] > 0:
-                st.success(
-                    f"✅ Cache working! {stats['total_hits']} classifications "
-                    f"reused from {stats['total_entries']} saved patterns."
-                )
-            else:
-                st.info("💡 No classifications in cache yet. Process some documents to populate the cache.")
-            
+            db_stats_mgr = get_cached_db(db_path)
+            if not db_stats_mgr:
+                st.error("Cannot connect to database")
+                return
+
+            db_stats = db_stats_mgr.get_statistics()
+
+            # Key metrics
+            st.subheader("Overview")
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("📄 Documents", db_stats.get("total_invoices", 0))
+            with c2:
+                st.metric("🛒 Items", db_stats.get("total_items", 0))
+            with c3:
+                st.metric("⚠️ Issues", db_stats.get("total_issues", 0))
+            with c4:
+                st.metric("💵 Total Value", f"R$ {db_stats.get('total_value', 0):,.2f}")
+
             st.divider()
-            
-            # Database statistics
-            st.subheader("💾 Database Statistics")
-            db_stats = db.get_statistics()
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("📄 Total Documents", db_stats["total_invoices"])
-            
-            with col2:
-                st.metric("🛒 Total Items", db_stats["total_items"])
-            
-            with col3:
-                st.metric("⚠️ Validation Issues", db_stats["total_issues"])
-            
+
             # Documents by type
-            if db_stats["by_type"]:
-                st.markdown("#### 📊 Documents by Type")
+            if db_stats.get("by_type"):
+                st.subheader("📊 Documents by Type")
                 type_df = {
                     "Type": list(db_stats["by_type"].keys()),
-                    "Count": list(db_stats["by_type"].values())
+                    "Count": list(db_stats["by_type"].values()),
                 }
-                st.bar_chart(type_df, x="Type", y="Count")
-            
-            st.metric("💵 Total Value Processed", f"R$ {db_stats['total_value']:,.2f}")
-                
-        except Exception as e:
-            logger.error(f"Error loading statistics: {e}")
-            st.error("Error loading statistics")
+                st.bar_chart(type_df, x="Type", y="Count", use_container_width=True)
+            else:
+                st.info("No documents in database yet.")
 
-    with tab6:
-        st.header("📊 System Statistics")
-        
-        # Cache statistics
-        from src.database.db import DatabaseManager
-        from src.ui.components.cache_stats import render_cache_stats
-        
-        try:
-            db = DatabaseManager()
-            
+            st.divider()
+
+            # Cache statistics
             st.subheader("🎯 Classification Cache")
-            st.markdown("Intelligent system that reduces LLM costs by reusing classifications from similar documents.")
-            
-            # Render cache stats (expanded by default in this tab)
-            stats = db.get_cache_statistics()
-            
+            st.caption("Intelligent system that reduces LLM costs by reusing classifications")
+
+            cache_stats = db_stats_mgr.get_cache_statistics()
+
             col1, col2, col3, col4 = st.columns(4)
-            
             with col1:
-                st.metric(
-                    "🗄️ Cache Entries",
-                    stats["total_entries"],
-                    help="Unique classifications stored"
-                )
-            
+                st.metric("🗄️ Cache Entries", cache_stats["total_entries"])
             with col2:
-                st.metric(
-                    "🎯 Cache Hits",
-                    stats["total_hits"],
-                    help="Times cache was used instead of calling LLM"
-                )
-            
+                st.metric("🎯 Cache Hits", cache_stats["total_hits"])
             with col3:
-                st.metric(
-                    "📈 Effectiveness",
-                    f"{stats['cache_effectiveness']:.1f}%",
-                    help="Percentage of classifications that came from cache"
-                )
-            
+                st.metric("📈 Effectiveness", f"{cache_stats['cache_effectiveness']:.1f}%")
             with col4:
-                avg_hits = stats["avg_hits_per_entry"]
-                cost_saved = stats["total_hits"] * 0.001  # Assuming $0.001 per LLM call
-                st.metric(
-                    "💰 Estimated Savings",
-                    f"${cost_saved:.2f}",
-                    help=f"Savings on LLM calls (avg {avg_hits:.1f} hits/entry)"
-                )
-            
-            if stats["total_entries"] > 0:
+                avg_hits = cache_stats["avg_hits_per_entry"]
+                cost_saved = cache_stats["total_hits"] * 0.001  # $0.001 per LLM call
+                st.metric("💰 Savings", f"${cost_saved:.2f}")
+
+            if cache_stats["total_entries"] > 0:
                 st.success(
-                    f"✅ Cache working! {stats['total_hits']} classifications "
-                    f"reused from {stats['total_entries']} saved patterns."
+                    f"✅ Cache working! {cache_stats['total_hits']} classifications "
+                    f"reused from {cache_stats['total_entries']} saved patterns."
                 )
             else:
-                st.info("💡 No classifications in cache yet. Process some documents to populate the cache.")
-            
-            st.divider()
-            
-            # Database statistics
-            st.subheader("💾 Database Statistics")
-            db_stats = db.get_statistics()
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("📄 Total Documents", db_stats["total_invoices"])
-            
-            with col2:
-                st.metric("🛒 Total Items", db_stats["total_items"])
-            
-            with col3:
-                st.metric("⚠️ Validation Issues", db_stats["total_issues"])
-            
-            # Documents by type
-            if db_stats["by_type"]:
-                st.markdown("#### 📊 Documents by Type")
-                type_df = {
-                    "Type": list(db_stats["by_type"].keys()),
-                    "Count": list(db_stats["by_type"].values())
-                }
-                st.bar_chart(type_df, x="Type", y="Count")
-            
-            st.metric("💵 Total Value Processed", f"R$ {db_stats['total_value']:,.2f}")
-                
-        except Exception as e:
+                st.info("💡 No classifications in cache yet. Process documents to populate the cache.")
+
+        except (ValueError, OSError, RuntimeError) as e:
             logger.error(f"Error loading statistics: {e}")
-            st.error("Error loading statistics")
+            st.error(f"Error loading statistics: {e}")
 
 
 if __name__ == "__main__":

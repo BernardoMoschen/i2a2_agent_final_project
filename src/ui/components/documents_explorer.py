@@ -5,12 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 import io
 import csv
+import logging
 from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 
 from src.database.db import DatabaseManager, InvoiceDB
+
+logger = logging.getLogger(__name__)
 
 
 DATE_PRESETS = [
@@ -298,7 +301,7 @@ def render_documents_explorer(db: DatabaseManager) -> None:
                     try:
                         import pyarrow as pa
                         import pyarrow.parquet as pq
-                    except Exception:
+                    except (ImportError, ModuleNotFoundError):
                         st.error("pyarrow is required for Parquet export. Please install pyarrow.")
                     else:
                         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".parquet")
@@ -543,8 +546,8 @@ def render_documents_explorer(db: DatabaseManager) -> None:
                 try:
                     if db.delete_invoice(key):
                         deleted += 1
-                except Exception:
-                    pass
+                except (ValueError, KeyError, RuntimeError) as e:
+                    logger.warning(f"Failed to delete invoice {key}: {e}")
             st.success(f"Deleted {deleted} documents")
             st.session_state.explorer_select_all = False
             st.rerun()

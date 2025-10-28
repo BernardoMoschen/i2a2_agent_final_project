@@ -217,7 +217,7 @@ class DatabaseManager:
         # Ensure schema is up-to-date for existing databases
         try:
             self._migrate_schema()
-        except Exception as e:
+        except (ValueError, KeyError, RuntimeError, OSError) as e:
             logger.error(f"Schema migration check failed: {e}")
 
     def _migrate_schema(self) -> None:
@@ -295,7 +295,7 @@ class DatabaseManager:
                     """
                 )
             self.fts_enabled = True
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             logger.warning(f"FTS5 not available: {e}")
             self.fts_enabled = False
             return
@@ -341,7 +341,7 @@ class DatabaseManager:
                             )
                         offset += batch
                     logger.info("FTS index populated")
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             logger.warning(f"Could not populate FTS index: {e}")
 
     def save_invoice(self, invoice_model, validation_issues: List, classification: Optional[dict] = None) -> InvoiceDB:
