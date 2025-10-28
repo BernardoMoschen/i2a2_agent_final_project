@@ -51,6 +51,22 @@ class InvoiceDB(SQLModel, table=True):
     classification_reasoning: Optional[str] = Field(default=None)
     used_llm_fallback: bool = Field(default=False)
     
+    # Transport-specific fields (CTe/MDFe)
+    modal: Optional[str] = Field(default=None, index=True)
+    rntrc: Optional[str] = Field(default=None)
+    vehicle_plate: Optional[str] = Field(default=None)
+    vehicle_uf: Optional[str] = Field(default=None)
+    route_ufs: Optional[str] = Field(default=None)  # JSON array as string
+    cargo_weight: Optional[Decimal] = Field(default=None)
+    cargo_weight_net: Optional[Decimal] = Field(default=None)
+    cargo_volume: Optional[Decimal] = Field(default=None)
+    service_taker_type: Optional[str] = Field(default=None)
+    freight_value: Optional[Decimal] = Field(default=None)
+    freight_type: Optional[str] = Field(default=None)
+    dangerous_cargo: bool = Field(default=False)
+    insurance_value: Optional[Decimal] = Field(default=None)
+    emission_type: Optional[str] = Field(default=None)
+    
     # Metadata
     raw_xml: Optional[str] = Field(default=None)
     parsed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -203,6 +219,21 @@ class DatabaseManager:
                 tax_pis=invoice_model.taxes.pis,
                 tax_cofins=invoice_model.taxes.cofins,
                 tax_issqn=invoice_model.taxes.issqn,
+                # Transport-specific fields
+                modal=invoice_model.modal,
+                rntrc=invoice_model.rntrc,
+                vehicle_plate=invoice_model.vehicle_plate,
+                vehicle_uf=invoice_model.vehicle_uf,
+                route_ufs=",".join(invoice_model.route_ufs) if invoice_model.route_ufs else None,
+                cargo_weight=invoice_model.cargo_weight,
+                cargo_weight_net=invoice_model.cargo_weight_net,
+                cargo_volume=invoice_model.cargo_volume,
+                service_taker_type=invoice_model.service_taker_type,
+                freight_value=invoice_model.freight_value,
+                freight_type=invoice_model.freight_type,
+                dangerous_cargo=invoice_model.dangerous_cargo,
+                insurance_value=invoice_model.insurance_value,
+                emission_type=invoice_model.emission_type,
                 raw_xml=invoice_model.raw_xml,
                 parsed_at=invoice_model.parsed_at,
             )

@@ -138,6 +138,64 @@ class InvoiceModel(BaseModel):
     # Tax breakdown
     taxes: TaxDetails = Field(default_factory=TaxDetails, description="Document-level taxes")
 
+    # Transport-specific fields (CTe/MDFe)
+    modal: str | None = Field(
+        None, 
+        description="Transport mode: 01=Rodoviário, 02=Aéreo, 03=Aquaviário, 04=Ferroviário, 05=Dutoviário, 06=Multimodal"
+    )
+    rntrc: str | None = Field(
+        None, 
+        description="RNTRC - Registro Nacional de Transportadores de Carga (8 digits)"
+    )
+    vehicle_plate: str | None = Field(
+        None, 
+        description="Vehicle license plate (ABC1234 or ABC1D23 Mercosul format)"
+    )
+    vehicle_uf: str | None = Field(
+        None, 
+        description="Vehicle registration state (UF)"
+    )
+    route_ufs: list[str] = Field(
+        default_factory=list, 
+        description="Route UF sequence for MDFe (ordered list of states)"
+    )
+    cargo_weight: Decimal | None = Field(
+        None, 
+        description="Gross cargo weight in kg (peso bruto)"
+    )
+    cargo_weight_net: Decimal | None = Field(
+        None, 
+        description="Net cargo weight in kg (peso líquido)"
+    )
+    cargo_volume: Decimal | None = Field(
+        None, 
+        description="Cargo volume in m³"
+    )
+    service_taker_type: str | None = Field(
+        None, 
+        description="CTe service taker: 0=Remetente, 1=Expedidor, 2=Recebedor, 3=Destinatário, 4=Outros"
+    )
+    freight_value: Decimal | None = Field(
+        None, 
+        description="Freight/transport service value (valor do serviço)"
+    )
+    freight_type: str | None = Field(
+        None, 
+        description="Freight type: 0=CIF (remetente), 1=FOB (destinatário), 2=Terceiros, 9=Sem frete"
+    )
+    dangerous_cargo: bool = Field(
+        default=False, 
+        description="Indicates if cargo is dangerous/hazardous"
+    )
+    insurance_value: Decimal | None = Field(
+        None, 
+        description="Insurance value (valor do seguro)"
+    )
+    emission_type: str | None = Field(
+        None, 
+        description="Emission type: 1=Normal, 2=Contingência FS-IA, 3=Contingência SCAN, etc."
+    )
+
     # Additional metadata
     raw_xml: str | None = Field(None, description="Original XML (for storage)")
     parsed_at: datetime = Field(
@@ -155,6 +213,30 @@ class InvoiceModel(BaseModel):
         if isinstance(v, str):
             return Decimal(v.replace(",", "."))
         return Decimal("0")
+
+    @field_validator(
+        "cargo_weight", 
+        "cargo_weight_net", 
+        "cargo_volume", 
+        "freight_value", 
+        "insurance_value", 
+        mode="before"
+    )
+    @classmethod
+    def parse_decimal_optional(cls, v: Any) -> Decimal | None:
+        """Parse optional decimal values safely."""
+        if v is None:
+            return None
+        if isinstance(v, Decimal):
+            return v
+        if isinstance(v, (int, float)):
+            return Decimal(str(v))
+        if isinstance(v, str):
+            v = v.strip()
+            if not v or v == "0" or v == "0.00":
+                return None
+            return Decimal(v.replace(",", "."))
+        return None
 
     model_config = ConfigDict(use_enum_values=True)
 

@@ -612,58 +612,69 @@ class FiscalValidatorTool:
                 field="total_invoice",
                 suggestion="Verify freight, insurance, discounts, and other charges",
             ),
-            # Items must exist
+            # Items must exist (except for CTe/MDFe which are transport documents)
             ValidationRule(
                 code="VAL005",
                 severity=ValidationSeverity.ERROR,
                 message="Invoice must contain at least one item",
-                check=lambda inv: len(inv.items) > 0,
+                check=lambda inv: (
+                    len(inv.items) > 0 or 
+                    inv.document_type in ["CTe", "MDFe"]  # Transport docs don't have items
+                ),
                 field="items",
-                suggestion="Verify XML structure and item parsing",
+                suggestion="Verify XML structure and item parsing (not applicable to CTe/MDFe)",
             ),
-            # Each item must have valid CFOP
+            # Each item must have valid CFOP (only for NFe/NFCe)
             ValidationRule(
                 code="VAL006",
                 severity=ValidationSeverity.WARNING,
                 message="One or more items have invalid CFOP (must be 4 digits)",
-                check=lambda inv: all(
-                    len(item.cfop) == 4 and item.cfop.isdigit() for item in inv.items
+                check=lambda inv: (
+                    len(inv.items) == 0 or  # Skip if no items (CTe/MDFe)
+                    all(len(item.cfop) == 4 and item.cfop.isdigit() for item in inv.items)
                 ),
                 field="items[].cfop",
                 suggestion="Verify CFOP codes against fiscal operation table",
             ),
-            # Each item should have NCM (optional but recommended)
+            # Each item should have NCM (optional but recommended, only for NFe/NFCe)
             ValidationRule(
                 code="VAL007",
                 severity=ValidationSeverity.INFO,
                 message="One or more items missing NCM code",
-                check=lambda inv: all(
-                    item.ncm is not None and item.ncm != "" for item in inv.items
+                check=lambda inv: (
+                    len(inv.items) == 0 or  # Skip if no items (CTe/MDFe)
+                    all(item.ncm is not None and item.ncm != "" for item in inv.items)
                 ),
                 field="items[].ncm",
                 suggestion="NCM codes help with classification and tax reporting",
             ),
-            # Item quantity * unit_price should match total_price
+            # Item quantity * unit_price should match total_price (only for NFe/NFCe)
             ValidationRule(
                 code="VAL008",
                 severity=ValidationSeverity.WARNING,
                 message="One or more items have quantity * unit_price != total_price",
-                check=lambda inv: all(
-                    abs(item.quantity * item.unit_price - item.total_price)
-                    <= FiscalValidatorTool.DECIMAL_TOLERANCE
-                    for item in inv.items
+                check=lambda inv: (
+                    len(inv.items) == 0 or  # Skip if no items (CTe/MDFe)
+                    all(
+                        abs(item.quantity * item.unit_price - item.total_price)
+                        <= FiscalValidatorTool.DECIMAL_TOLERANCE
+                        for item in inv.items
+                    )
                 ),
                 field="items[].total_price",
                 suggestion="Check for rounding errors in item calculations",
             ),
-            # Positive values
+            # Positive values (except MDFe which has no monetary value)
             ValidationRule(
                 code="VAL009",
                 severity=ValidationSeverity.ERROR,
                 message="Total invoice value must be positive",
-                check=lambda inv: inv.total_invoice > 0,
+                check=lambda inv: (
+                    inv.total_invoice > 0 or 
+                    inv.document_type == "MDFe"  # MDFe is just a manifest, has no monetary value
+                ),
                 field="total_invoice",
-                suggestion="Verify if this is a return or cancellation document",
+                suggestion="Verify if this is a return or cancellation document (not applicable to MDFe)",
             ),
             # Future date check
             ValidationRule(
@@ -900,6 +911,255 @@ class FiscalValidatorTool:
                 field="issuer_ie, issuer_uf",
                 suggestion="Verify Inscrição Estadual - check digit validation failed for this state",
             ),
+            
+            # ===== CTe SPECIFIC VALIDATIONS (VAL050-VAL059) =====
+            
+            # VAL050: CTe - Modal de Transporte
+            ValidationRule(
+                code="VAL050",
+                severity=ValidationSeverity.ERROR,
+                message="CTe has invalid transport modal code",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    self._validate_cte_modal(inv)
+                ),
+                field="modal",
+                suggestion="Valid modals: 01=Rodoviário, 02=Aéreo, 03=Aquaviário, 04=Ferroviário, 05=Dutoviário, 06=Multimodal",
+            ),
+            
+            # VAL051: CTe - RNTRC Format
+            ValidationRule(
+                code="VAL051",
+                severity=ValidationSeverity.WARNING,
+                message="CTe RNTRC has invalid format (must be 8 digits)",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    self._validate_cte_rntrc(inv)
+                ),
+                field="rntrc",
+                suggestion="RNTRC must be 8 numeric digits (Registro Nacional de Transportadores)",
+            ),
+            
+            # VAL052: CTe - CFOP para Transporte
+            ValidationRule(
+                code="VAL052",
+                severity=ValidationSeverity.ERROR,
+                message="CTe has CFOP not valid for transport services",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    self._validate_cte_cfop(inv)
+                ),
+                field="cfop",
+                suggestion="Valid CFOPs for transport: 1351-1359, 2351-2359, 5351-5359, 6351-6359",
+            ),
+            
+            # VAL053: CTe - Valor do Serviço
+            ValidationRule(
+                code="VAL053",
+                severity=ValidationSeverity.ERROR,
+                message="CTe transport service value must be greater than zero",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    inv.total_invoice > 0
+                ),
+                field="total_invoice",
+                suggestion="Verify vTPrest - transport service value cannot be zero",
+            ),
+            
+            # VAL054: CTe - Placa do Veículo
+            ValidationRule(
+                code="VAL054",
+                severity=ValidationSeverity.WARNING,
+                message="CTe vehicle plate has invalid format",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    self._validate_vehicle_plate(inv)
+                ),
+                field="vehicle_plate",
+                suggestion="Valid formats: ABC1234 (old) or ABC1D23 (Mercosul)",
+            ),
+            
+            # VAL055: CTe - UF Origem/Destino
+            ValidationRule(
+                code="VAL055",
+                severity=ValidationSeverity.ERROR,
+                message="CTe has invalid origin or destination UF",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    self._validate_cte_ufs(inv)
+                ),
+                field="issuer_uf, recipient_uf",
+                suggestion="Verify UF codes - must be valid Brazilian states",
+            ),
+            
+            # ===== MDFe SPECIFIC VALIDATIONS (VAL060-VAL069) =====
+            
+            # VAL060: MDFe - Modal de Transporte
+            ValidationRule(
+                code="VAL060",
+                severity=ValidationSeverity.ERROR,
+                message="MDFe has invalid transport modal code",
+                check=lambda inv: (
+                    inv.document_type != "MDFe" or 
+                    self._validate_mdfe_modal(inv)
+                ),
+                field="modal",
+                suggestion="Valid modals: 01=Rodoviário, 02=Aéreo, 03=Aquaviário, 04=Ferroviário",
+            ),
+            
+            # VAL061: MDFe - Percurso UF
+            ValidationRule(
+                code="VAL061",
+                severity=ValidationSeverity.WARNING,
+                message="MDFe route UFs are invalid or duplicated",
+                check=lambda inv: (
+                    inv.document_type != "MDFe" or 
+                    self._validate_mdfe_route(inv)
+                ),
+                field="route_ufs",
+                suggestion="Verify infPercurso - route UFs must be valid and non-duplicated",
+            ),
+            
+            # VAL062: MDFe - Placa do Veículo Principal
+            ValidationRule(
+                code="VAL062",
+                severity=ValidationSeverity.WARNING,
+                message="MDFe vehicle plate has invalid format",
+                check=lambda inv: (
+                    inv.document_type != "MDFe" or 
+                    self._validate_vehicle_plate(inv)
+                ),
+                field="vehicle_plate",
+                suggestion="Valid formats: ABC1234 (old) or ABC1D23 (Mercosul)",
+            ),
+            
+            # VAL063: MDFe - Peso Total
+            ValidationRule(
+                code="VAL063",
+                severity=ValidationSeverity.WARNING,
+                message="MDFe total weight must be greater than zero",
+                check=lambda inv: (
+                    inv.document_type != "MDFe" or 
+                    self._validate_mdfe_weight(inv)
+                ),
+                field="total_weight",
+                suggestion="Verify qCarga - total cargo weight in kg",
+            ),
+            
+            # ===== ADDITIONAL CTe VALIDATIONS (VAL056-VAL059) =====
+            
+            # VAL056: CTe - Tipo de Tomador do Serviço
+            ValidationRule(
+                code="VAL056",
+                severity=ValidationSeverity.WARNING,
+                message="CTe service taker type is invalid",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    not inv.service_taker_type or
+                    inv.service_taker_type in ["0", "1", "2", "3", "4"]
+                ),
+                field="service_taker_type",
+                suggestion="Valid types: 0=Remetente, 1=Expedidor, 2=Recebedor, 3=Destinatário, 4=Outros",
+            ),
+            
+            # VAL057: CTe - Tipo de Frete
+            ValidationRule(
+                code="VAL057",
+                severity=ValidationSeverity.INFO,
+                message="CTe freight type is recommended to be specified",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    bool(inv.freight_type)
+                ),
+                field="freight_type",
+                suggestion="Specify freight type: 0=CIF (remetente), 1=FOB (destinatário), 2=Terceiros, 9=Sem frete",
+            ),
+            
+            # VAL058: CTe - Carga Perigosa Requer Detalhes
+            ValidationRule(
+                code="VAL058",
+                severity=ValidationSeverity.WARNING,
+                message="CTe with dangerous cargo should have cargo details",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    not inv.dangerous_cargo or
+                    (inv.cargo_weight is not None and inv.cargo_weight > 0)
+                ),
+                field="dangerous_cargo",
+                suggestion="Dangerous cargo requires weight and additional safety documentation",
+            ),
+            
+            # VAL059: CTe - Seguro Recomendado para Alto Valor
+            ValidationRule(
+                code="VAL059",
+                severity=ValidationSeverity.INFO,
+                message="CTe with high freight value should have insurance",
+                check=lambda inv: (
+                    inv.document_type != "CTe" or 
+                    inv.total_invoice < Decimal("5000.00") or
+                    (inv.insurance_value is not None and inv.insurance_value > 0)
+                ),
+                field="insurance_value",
+                suggestion="Consider adding insurance for freight values above R$ 5,000.00",
+            ),
+            
+            # ===== ADDITIONAL MDFe VALIDATIONS (VAL064-VAL067) =====
+            
+            # VAL064: MDFe - Tipo de Emissão
+            ValidationRule(
+                code="VAL064",
+                severity=ValidationSeverity.INFO,
+                message="MDFe emission type is recommended",
+                check=lambda inv: (
+                    inv.document_type != "MDFe" or 
+                    bool(inv.emission_type)
+                ),
+                field="emission_type",
+                suggestion="Specify emission type: 1=Normal, 2=Contingência FS-IA, etc.",
+            ),
+            
+            # VAL065: MDFe - RNTRC Recomendado
+            ValidationRule(
+                code="VAL065",
+                severity=ValidationSeverity.INFO,
+                message="MDFe should include RNTRC when available",
+                check=lambda inv: (
+                    inv.document_type != "MDFe" or 
+                    bool(inv.rntrc)
+                ),
+                field="rntrc",
+                suggestion="Include RNTRC (Registro Nacional de Transportadores) when applicable",
+            ),
+            
+            # VAL066: MDFe - Placa e UF Veículo Consistentes
+            ValidationRule(
+                code="VAL066",
+                severity=ValidationSeverity.WARNING,
+                message="MDFe vehicle plate should have matching UF",
+                check=lambda inv: (
+                    inv.document_type != "MDFe" or 
+                    not inv.vehicle_plate or
+                    bool(inv.vehicle_uf)
+                ),
+                field="vehicle_uf",
+                suggestion="Specify vehicle registration state (UF) when plate is provided",
+            ),
+            
+            # VAL067: MDFe - Percurso Coerente com Origem/Destino
+            ValidationRule(
+                code="VAL067",
+                severity=ValidationSeverity.INFO,
+                message="MDFe route should start with issuer UF",
+                check=lambda inv: (
+                    inv.document_type != "MDFe" or 
+                    not inv.route_ufs or
+                    not inv.issuer_uf or
+                    len(inv.route_ufs) == 0 or
+                    inv.route_ufs[0] == inv.issuer_uf
+                ),
+                field="route_ufs",
+                suggestion="Route typically starts at issuer's state (UF)",
+            ),
         ]
     
     def _check_not_duplicate(self, invoice: InvoiceModel) -> bool:
@@ -926,6 +1186,126 @@ class FiscalValidatorTool:
         except Exception:
             # If database check fails, skip validation (don't block processing)
             return True
+    
+    # ===== CTe/MDFe SPECIFIC VALIDATION HELPERS =====
+    
+    def _validate_cte_modal(self, invoice: InvoiceModel) -> bool:
+        """Validate CTe modal from model field."""
+        try:
+            from src.services.transport_validators import validate_modal
+            
+            if not invoice.modal:
+                return True  # Modal is optional in parsed data
+            
+            return validate_modal(invoice.modal)
+        except Exception as e:
+            logger.warning(f"Error validating CTe modal: {e}")
+            return True  # Fail-safe
+    
+    def _validate_cte_rntrc(self, invoice: InvoiceModel) -> bool:
+        """Validate CTe RNTRC from model field."""
+        try:
+            from src.services.transport_validators import validate_rntrc_format
+            
+            if not invoice.rntrc:
+                return True  # RNTRC is optional in some cases
+            
+            return validate_rntrc_format(invoice.rntrc)
+        except Exception as e:
+            logger.warning(f"Error validating CTe RNTRC: {e}")
+            return True  # Fail-safe
+    
+    def _validate_cte_cfop(self, invoice: InvoiceModel) -> bool:
+        """Validate CTe CFOP from raw XML (CFOP is in items for NFe, but in ide for CTe)."""
+        try:
+            from src.services.transport_validators import validate_cfop_for_transport
+            from defusedxml import ElementTree as ET
+            
+            if not invoice.raw_xml:
+                return True  # Skip if no raw XML
+            
+            root = ET.fromstring(invoice.raw_xml)
+            # Find CFOP in ide section
+            cfop_elem = root.find(".//{http://www.portalfiscal.inf.br/cte}CFOP")
+            if cfop_elem is None:
+                cfop_elem = root.find(".//CFOP")
+            
+            if cfop_elem is not None and cfop_elem.text:
+                return validate_cfop_for_transport(cfop_elem.text)
+            
+            return True  # Skip if CFOP not found
+        except Exception as e:
+            logger.warning(f"Error validating CTe CFOP: {e}")
+            return True  # Fail-safe
+    
+    def _validate_vehicle_plate(self, invoice: InvoiceModel) -> bool:
+        """Validate vehicle plate from model field."""
+        try:
+            from src.services.transport_validators import validate_vehicle_plate
+            
+            if not invoice.vehicle_plate:
+                return True  # Plate is optional
+            
+            return validate_vehicle_plate(invoice.vehicle_plate)
+        except Exception as e:
+            logger.warning(f"Error validating vehicle plate: {e}")
+            return True  # Fail-safe
+    
+    def _validate_cte_ufs(self, invoice: InvoiceModel) -> bool:
+        """Validate CTe origin/destination UFs."""
+        try:
+            from src.services.transport_validators import validate_uf
+            
+            if invoice.issuer_uf and not validate_uf(invoice.issuer_uf):
+                return False
+            
+            if invoice.recipient_uf and not validate_uf(invoice.recipient_uf):
+                return False
+            
+            return True
+        except Exception as e:
+            logger.warning(f"Error validating CTe UFs: {e}")
+            return True  # Fail-safe
+    
+    def _validate_mdfe_modal(self, invoice: InvoiceModel) -> bool:
+        """Validate MDFe modal from model field."""
+        try:
+            from src.services.transport_validators import validate_modal
+            
+            if not invoice.modal:
+                return True  # Modal is optional
+            
+            # MDFe only supports modals 01-04 (no pipeline or multimodal)
+            return validate_modal(invoice.modal) and invoice.modal in ["01", "02", "03", "04"]
+        except Exception as e:
+            logger.warning(f"Error validating MDFe modal: {e}")
+            return True  # Fail-safe
+    
+    def _validate_mdfe_route(self, invoice: InvoiceModel) -> bool:
+        """Validate MDFe route UFs from model field."""
+        try:
+            from src.services.transport_validators import validate_uf_route
+            
+            if not invoice.route_ufs or len(invoice.route_ufs) == 0:
+                return True  # Route is optional or empty
+            
+            return validate_uf_route(invoice.route_ufs)
+        except Exception as e:
+            logger.warning(f"Error validating MDFe route: {e}")
+            return True  # Fail-safe
+    
+    def _validate_mdfe_weight(self, invoice: InvoiceModel) -> bool:
+        """Validate MDFe weight from model field."""
+        try:
+            from src.services.transport_validators import validate_weight
+            
+            if invoice.cargo_weight is None:
+                return True  # Weight might be optional
+            
+            return validate_weight(invoice.cargo_weight)
+        except Exception as e:
+            logger.warning(f"Error validating MDFe weight: {e}")
+            return True  # Fail-safe
 
     def add_rule(self, rule: ValidationRule) -> None:
         """Add a custom validation rule."""

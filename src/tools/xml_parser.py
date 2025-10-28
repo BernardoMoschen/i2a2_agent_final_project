@@ -451,6 +451,61 @@ class XMLParserTool:
             cofins=Decimal("0"),
         )
         
+        # Extract transport-specific fields
+        # Modal de transporte
+        modal = self._get_text(ide, "modal")
+        
+        # RNTRC (Registro Nacional de Transportadores)
+        rntrc = None
+        rodo = None
+        inf_modal = inf_cte.find(".//infModal", self.NAMESPACES) or inf_cte.find(".//cte:infModal", self.NAMESPACES)
+        if inf_modal is not None:
+            rodo = inf_modal.find(".//rodo", self.NAMESPACES) or inf_modal.find(".//cte:rodo", self.NAMESPACES)
+            if rodo is not None:
+                inf_antt = rodo.find(".//infANTT", self.NAMESPACES) or rodo.find(".//cte:infANTT", self.NAMESPACES)
+                if inf_antt is not None:
+                    rntrc = self._get_text(inf_antt, "RNTRC")
+        
+        # Placa do veículo
+        vehicle_plate = None
+        vehicle_uf = None
+        if rodo is not None:
+            veic_tracicao = rodo.find(".//veicTracao", self.NAMESPACES) or rodo.find(".//cte:veicTracao", self.NAMESPACES)
+            if veic_tracicao is not None:
+                vehicle_plate = self._get_text(veic_tracicao, "placa")
+                vehicle_uf = self._get_text(veic_tracicao, "UF")
+        
+        # Tipo de tomador de serviço
+        service_taker_type = self._get_text(ide, "toma")
+        
+        # Tipo de serviço/frete
+        freight_type = self._get_text(ide, "tpServ")
+        
+        # Informações da carga
+        cargo_weight = None
+        cargo_weight_net = None
+        cargo_volume = None
+        inf_carga = inf_cte.find(".//infCarga", self.NAMESPACES) or inf_cte.find(".//cte:infCarga", self.NAMESPACES)
+        if inf_carga is not None:
+            peso_bruto = self._get_text(inf_carga, "vCarga")
+            if peso_bruto:
+                cargo_weight = Decimal(peso_bruto)
+        
+        # Valor do seguro
+        insurance_value = None
+        v_prest_seg = self._get_text(v_prest, "vRec") or self._get_text(v_prest, "vSeg")
+        if v_prest_seg:
+            insurance_value = Decimal(v_prest_seg)
+        
+        # Tipo de emissão
+        emission_type = self._get_text(ide, "tpEmis")
+        
+        # Carga perigosa
+        dangerous_cargo = False
+        inf_carga_peri = inf_cte.find(".//infCargaPeri", self.NAMESPACES) or inf_cte.find(".//cte:infCargaPeri", self.NAMESPACES)
+        if inf_carga_peri is not None:
+            dangerous_cargo = True
+        
         return InvoiceModel(
             document_type=DocumentType.CTE,
             document_key=document_key,
@@ -477,6 +532,20 @@ class XMLParserTool:
             other_expenses=Decimal("0"),
             items=[],  # CTe has no product items
             taxes=taxes,
+            # Transport-specific fields
+            modal=modal,
+            rntrc=rntrc,
+            vehicle_plate=vehicle_plate,
+            vehicle_uf=vehicle_uf,
+            service_taker_type=service_taker_type,
+            freight_value=total_products,  # Same as total_products for CTe
+            freight_type=freight_type,
+            cargo_weight=cargo_weight,
+            cargo_weight_net=cargo_weight_net,
+            cargo_volume=cargo_volume,
+            insurance_value=insurance_value,
+            emission_type=emission_type,
+            dangerous_cargo=dangerous_cargo,
             raw_xml=xml_content,
         )
 
@@ -559,6 +628,54 @@ class XMLParserTool:
             cofins=Decimal("0"),
         )
         
+        # Extract transport-specific fields for MDFe
+        # Modal de transporte
+        modal = self._get_text(ide, "modal")
+        
+        # RNTRC
+        rntrc = None
+        rodo = None
+        inf_modal = inf_mdfe.find(".//infModal", self.NAMESPACES) or inf_mdfe.find(".//mdfe:infModal", self.NAMESPACES)
+        if inf_modal is not None:
+            rodo = inf_modal.find(".//rodo", self.NAMESPACES) or inf_modal.find(".//mdfe:rodo", self.NAMESPACES)
+            if rodo is not None:
+                inf_antt = rodo.find(".//infANTT", self.NAMESPACES) or rodo.find(".//mdfe:infANTT", self.NAMESPACES)
+                if inf_antt is not None:
+                    rntrc = self._get_text(inf_antt, "RNTRC")
+        
+        # Placa do veículo de tração
+        vehicle_plate = None
+        vehicle_uf = None
+        if rodo is not None:
+            veic_tracao = rodo.find(".//veicTracao", self.NAMESPACES) or rodo.find(".//mdfe:veicTracao", self.NAMESPACES)
+            if veic_tracao is not None:
+                vehicle_plate = self._get_text(veic_tracao, "placa")
+                vehicle_uf = self._get_text(veic_tracao, "UF")
+        
+        # Percurso (route UFs)
+        route_ufs = []
+        for perc in inf_mdfe.findall(".//infPercurso", self.NAMESPACES):
+            uf = self._get_text(perc, "UFPer")
+            if uf and uf not in route_ufs:
+                route_ufs.append(uf)
+        # Fallback to namespace-qualified search
+        if not route_ufs:
+            for perc in inf_mdfe.findall(".//mdfe:infPercurso", self.NAMESPACES):
+                uf = self._get_text(perc, "UFPer")
+                if uf and uf not in route_ufs:
+                    route_ufs.append(uf)
+        
+        # Peso total da carga
+        cargo_weight = None
+        tot = inf_mdfe.find(".//tot", self.NAMESPACES) or inf_mdfe.find(".//mdfe:tot", self.NAMESPACES)
+        if tot is not None:
+            peso_bruto = self._get_text(tot, "qCarga")
+            if peso_bruto:
+                cargo_weight = Decimal(peso_bruto)
+        
+        # Tipo de emissão
+        emission_type = self._get_text(ide, "tpEmis")
+        
         return InvoiceModel(
             document_type=DocumentType.MDFE,
             document_key=document_key,
@@ -585,6 +702,14 @@ class XMLParserTool:
             other_expenses=Decimal("0"),
             items=[],  # MDFe has no product items
             taxes=taxes,
+            # Transport-specific fields
+            modal=modal,
+            rntrc=rntrc,
+            vehicle_plate=vehicle_plate,
+            vehicle_uf=vehicle_uf,
+            route_ufs=route_ufs,
+            cargo_weight=cargo_weight,
+            emission_type=emission_type,
             raw_xml=xml_content,
         )
 
