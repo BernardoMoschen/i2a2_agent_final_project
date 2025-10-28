@@ -46,6 +46,13 @@ def render_async_upload_tab():
 
     st.header("⚡ Upload de Documentos Fiscais")
     
+    # Info banner com suporte a documentos
+    st.info(
+        "📄 **Documentos Suportados:** NFe, NFCe, CTe (transporte), MDFe (manifesto) | "
+        "📦 Aceita XMLs individuais ou ZIPs com múltiplos documentos",
+        icon="ℹ️"
+    )
+    
     # Container fixo para evitar scroll jump durante updates
     progress_container = st.empty()
 
@@ -56,7 +63,7 @@ def render_async_upload_tab():
         type=["xml", "zip"],
         accept_multiple_files=True,
         key="async_uploader",
-        help="Suporta múltiplos arquivos XML ou arquivos ZIP contendo XMLs",
+        help="Suporta NFe, NFCe, CTe, MDFe - arquivos individuais ou ZIPs",
     )
 
     if not uploaded_files:
@@ -326,44 +333,78 @@ def render_job_progress(job_id: str):
 
 
 def _render_success_result(result: dict):
-    """Render a successful processing result."""
+    """Render a successful processing result with visual document type badges."""
     
     invoice = result["invoice"]
     issues = result.get("issues", [])
     classification = result.get("classification")
+    
+    # Document type emoji and color
+    doc_type_info = {
+        "NFe": {"emoji": "🧾", "color": "blue"},
+        "NFCe": {"emoji": "🧾", "color": "green"},
+        "CTe": {"emoji": "🚚", "color": "orange"},
+        "MDFe": {"emoji": "📋", "color": "purple"},
+    }
+    
+    info = doc_type_info.get(invoice.document_type, {"emoji": "📄", "color": "gray"})
+    
+    # Build expander title with document type badge
+    title = f"{info['emoji']} **{invoice.document_type}** {invoice.document_number}"
+    if invoice.document_type in ["CTe", "MDFe"]:
+        title += f" - {result['file']}"
+    else:
+        title += f" - {invoice.issuer_name[:30]}..."
 
-    with st.expander(
-        f"📄 {result['file']} - {invoice.document_type} {invoice.document_number}",
-        expanded=False,
-    ):
+    with st.expander(title, expanded=False):
         # Invoice summary
         col1, col2 = st.columns(2)
         
         with col1:
+            doc_label = {
+                "NFe": "Nota Fiscal Eletrônica",
+                "NFCe": "Nota Fiscal Consumidor",
+                "CTe": "Conhecimento de Transporte",
+                "MDFe": "Manifesto de Documentos"
+            }.get(invoice.document_type, invoice.document_type)
+            
             st.markdown(f"""
-            **Tipo:** {invoice.document_type}  
+            **Tipo:** {doc_label}  
             **Número:** {invoice.document_number}/{invoice.series}  
             **Chave:** `{invoice.document_key}`  
-            **Data:** {invoice.issue_date.strftime("%d/%m/%Y")}
+            **Data:** {invoice.issue_date.strftime("%d/%m/%Y %H:%M")}
             """)
         
         with col2:
-            st.markdown(f"""
-            **Emitente:** {invoice.issuer_name}  
-            **CNPJ:** {invoice.issuer_cnpj}  
-            **Destinatário:** {invoice.recipient_name or "N/A"}  
-            """)
+            # Show different info based on document type
+            if invoice.document_type in ["CTe", "MDFe"]:
+                st.markdown(f"""
+                **Transportadora:** {invoice.issuer_name}  
+                **CNPJ:** {invoice.issuer_cnpj}  
+                **Origem:** {invoice.issuer_uf or "N/A"}  
+                **Destino:** {invoice.recipient_uf or "N/A"}
+                """)
+            else:
+                st.markdown(f"""
+                **Emitente:** {invoice.issuer_name}  
+                **CNPJ:** {invoice.issuer_cnpj}  
+                **Destinatário:** {invoice.recipient_name or "N/A"}  
+                """)
 
-        # Financial info
-        st.markdown("### 💰 Valores")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Produtos", f"R$ {invoice.total_products:,.2f}")
-        with col2:
-            st.metric("Impostos", f"R$ {invoice.total_taxes:,.2f}")
-        with col3:
-            st.metric("Total", f"R$ {invoice.total_invoice:,.2f}")
+        # Financial info (skip for MDFe which has no values)
+        if invoice.document_type != "MDFe":
+            st.markdown("### 💰 Valores")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                label = "Serviço" if invoice.document_type == "CTe" else "Produtos"
+                st.metric(label, f"R$ {invoice.total_products:,.2f}")
+            with col2:
+                st.metric("Impostos", f"R$ {invoice.total_taxes:,.2f}")
+            with col3:
+                st.metric("Total", f"R$ {invoice.total_invoice:,.2f}")
+        else:
+            st.info("📋 **Manifesto:** Documento de controle (sem valores monetários)", icon="ℹ️")
 
         # Classification
         if classification:
