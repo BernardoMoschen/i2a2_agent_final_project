@@ -212,6 +212,64 @@ class DatabaseManager:
     def _create_tables(self) -> None:
         """Create all tables if they don't exist."""
         SQLModel.metadata.create_all(self.engine)
+        # Ensure schema is up-to-date for existing databases
+        try:
+            self._migrate_schema()
+        except Exception as e:
+            logger.error(f"Schema migration check failed: {e}")
+
+    def _migrate_schema(self) -> None:
+        """
+        Lightweight schema migrator for SQLite to add newly introduced columns and indexes.
+
+        This is safe to run repeatedly and will only apply changes if missing.
+        """
+        if "sqlite" not in self.database_url:
+            return
+
+        transport_columns = {
+            "modal": "TEXT",
+            "rntrc": "TEXT",
+            "vehicle_plate": "TEXT",
+            "vehicle_uf": "TEXT",
+            "route_ufs": "TEXT",
+            "cargo_weight": "NUMERIC",
+            "cargo_weight_net": "NUMERIC",
+            "cargo_volume": "NUMERIC",
+            "service_taker_type": "TEXT",
+            "freight_value": "NUMERIC",
+            "freight_type": "TEXT",
+            "dangerous_cargo": "INTEGER DEFAULT 0",
+            "insurance_value": "NUMERIC",
+            "emission_type": "TEXT",
+        }
+
+        composite_indexes = [
+            ("ix_invoices_date_type", "invoices", "issue_date, document_type"),
+            ("ix_invoices_issuer_date", "invoices", "issuer_cnpj, issue_date"),
+            ("ix_invoices_recipient_date", "invoices", "recipient_cnpj_cpf, issue_date"),
+            ("ix_invoices_cost_center_op", "invoices", "cost_center, operation_type"),
+            ("ix_invoices_modal_date", "invoices", "modal, issue_date"),
+        ]
+
+        with self.engine.begin() as conn:
+            # Discover existing columns
+            existing_cols = set()
+            for row in conn.exec_driver_sql("PRAGMA table_info(invoices)").fetchall():
+                # PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
+                existing_cols.add(row[1])
+
+            # Add missing transport columns
+            for col, col_type in transport_columns.items():
+                if col not in existing_cols:
+                    logger.info(f"Applying migration: add column invoices.{col} {col_type}")
+                    conn.exec_driver_sql(f"ALTER TABLE invoices ADD COLUMN {col} {col_type}")
+
+            # Ensure composite indexes exist
+            for idx_name, table, cols in composite_indexes:
+                conn.exec_driver_sql(
+                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} ({cols})"
+                )
 
     def save_invoice(self, invoice_model, validation_issues: List, classification: Optional[dict] = None) -> InvoiceDB:
         """
