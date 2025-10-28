@@ -41,6 +41,10 @@ class AsyncProcessor:
             self.max_workers = min(max_workers, 10)  # Cap at 10 for safety
             
         self.lock = threading.Lock()
+        
+        # Local jobs storage (thread-safe alternative to session_state in threads)
+        self.jobs: Dict[str, dict] = {}
+        
         logger.info(f"AsyncProcessor initialized with {self.max_workers} workers (auto-tuned)")
 
     def process_files_async(
@@ -78,12 +82,12 @@ class AsyncProcessor:
                 except:
                     total_xmls += 1  # Count as 1 if ZIP reading fails
         
-        # Initialize jobs dict in session_state
+        # Initialize jobs dict in session_state (for UI access)
         if "processing_jobs" not in st.session_state:
             st.session_state.processing_jobs = {}
 
-        # Create job entry with accurate total
-        st.session_state.processing_jobs[job_id] = {
+        # Create job entry in BOTH local storage (for thread) and session_state (for UI)
+        job_data = {
             "status": "processing",
             "total": total_xmls,  # Accurate XML count, not file count
             "processed": 0,
@@ -96,6 +100,11 @@ class AsyncProcessor:
             "company_id": company_id,
             "user_id": user_id,
         }
+        
+        # Store in both places
+        with self.lock:
+            self.jobs[job_id] = job_data
+            st.session_state.processing_jobs[job_id] = job_data
 
         logger.info(f"Job {job_id} created with {total_xmls} XMLs from {len(files)} file(s)")
 
@@ -213,9 +222,10 @@ class AsyncProcessor:
                     result = future.result(timeout=60)  # 60s timeout per file
 
                     with self.lock:
-                        job = st.session_state.processing_jobs.get(job_id)
+                        # Use local storage (thread-safe)
+                        job = self.jobs.get(job_id)
                         if not job:
-                            logger.warning(f"[{job_id}] Job disappeared from session state")
+                            logger.warning(f"[{job_id}] Job not found in local storage")
                             return
 
                         job["processed"] += 1
@@ -228,25 +238,47 @@ class AsyncProcessor:
                             job["failed"] += 1
                             job["errors"].append(result)
                             logger.warning(f"[{job_id}] ❌ {filename} failed: {result.get('error')}")
+                        
+                        # Sync to session_state for UI updates
+                        try:
+                            if "processing_jobs" in st.session_state:
+                                st.session_state.processing_jobs[job_id] = job
+                        except Exception as e:
+                            logger.debug(f"Could not sync to session_state: {e}")
 
                 except Exception as e:
                     logger.error(f"[{job_id}] Exception processing {filename}: {e}", exc_info=True)
                     with self.lock:
-                        job = st.session_state.processing_jobs.get(job_id)
+                        job = self.jobs.get(job_id)
                         if job:
                             job["processed"] += 1
                             job["failed"] += 1
                             job["errors"].append(
                                 {"file": filename, "index": idx, "error": str(e)}
                             )
+                            
+                            # Sync to session_state
+                            try:
+                                if "processing_jobs" in st.session_state:
+                                    st.session_state.processing_jobs[job_id] = job
+                            except Exception as sync_e:
+                                logger.debug(f"Could not sync to session_state: {sync_e}")
 
         # Mark job as completed
         with self.lock:
-            job = st.session_state.processing_jobs.get(job_id)
+            job = self.jobs.get(job_id)
             if job:
                 job["status"] = "completed"
                 job["completed_at"] = datetime.now()
                 elapsed = (job["completed_at"] - job["started_at"]).total_seconds()
+                
+                # Sync final state to session_state
+                try:
+                    if "processing_jobs" in st.session_state:
+                        st.session_state.processing_jobs[job_id] = job
+                except Exception as e:
+                    logger.debug(f"Could not sync final state to session_state: {e}")
+                
                 logger.info(
                     f"[{job_id}] ✅ Batch completed in {elapsed:.1f}s: "
                     f"{job['successful']}/{job['total']} successful"
@@ -311,10 +343,26 @@ class AsyncProcessor:
         Returns:
             Job status dict or None if not found
         """
-        if "processing_jobs" not in st.session_state:
+        with self.lock:
+            # Try local storage first (most up-to-date from thread)
+            job = self.jobs.get(job_id)
+            
+            if job:
+                # Sync to session_state for UI persistence
+                try:
+                    if "processing_jobs" not in st.session_state:
+                        st.session_state.processing_jobs = {}
+                    st.session_state.processing_jobs[job_id] = job
+                except Exception as e:
+                    logger.debug(f"Could not sync to session_state: {e}")
+                
+                return job
+            
+            # Fallback to session_state if not in local storage
+            if "processing_jobs" in st.session_state:
+                return st.session_state.processing_jobs.get(job_id)
+            
             return None
-
-        return st.session_state.processing_jobs.get(job_id)
 
     def cancel_job(self, job_id: str) -> bool:
         """
@@ -326,20 +374,27 @@ class AsyncProcessor:
         Returns:
             True if job was found and cancelled
         """
-        if "processing_jobs" not in st.session_state:
-            return False
-
-        job = st.session_state.processing_jobs.get(job_id)
-        if job:
-            job["status"] = "cancelled"
-            logger.info(f"[{job_id}] Job cancelled by user")
-            return True
+        with self.lock:
+            # Update in local storage
+            job = self.jobs.get(job_id)
+            if job:
+                job["status"] = "cancelled"
+                logger.info(f"[{job_id}] Job cancelled by user")
+                
+                # Sync to session_state
+                try:
+                    if "processing_jobs" in st.session_state:
+                        st.session_state.processing_jobs[job_id] = job
+                except Exception as e:
+                    logger.debug(f"Could not sync cancellation to session_state: {e}")
+                
+                return True
 
         return False
 
     def clear_job(self, job_id: str) -> bool:
         """
-        Remove job from session state.
+        Remove job from both local storage and session state.
         
         Args:
             job_id: Job identifier
@@ -347,24 +402,39 @@ class AsyncProcessor:
         Returns:
             True if job was found and removed
         """
-        if "processing_jobs" not in st.session_state:
-            return False
-
-        if job_id in st.session_state.processing_jobs:
-            del st.session_state.processing_jobs[job_id]
-            logger.info(f"[{job_id}] Job cleared from session state")
-            return True
+        with self.lock:
+            # Remove from local storage
+            if job_id in self.jobs:
+                del self.jobs[job_id]
+            
+            # Remove from session_state
+            try:
+                if "processing_jobs" in st.session_state and job_id in st.session_state.processing_jobs:
+                    del st.session_state.processing_jobs[job_id]
+                    logger.info(f"[{job_id}] Job cleared from storage")
+                    return True
+            except Exception as e:
+                logger.debug(f"Could not clear from session_state: {e}")
 
         return False
 
     def get_all_jobs(self) -> Dict[str, Dict]:
         """
-        Get all jobs in session state.
+        Get all jobs from local storage (most up-to-date).
         
         Returns:
             Dict of job_id -> job_data
         """
-        if "processing_jobs" not in st.session_state:
-            return {}
-
-        return st.session_state.processing_jobs
+        with self.lock:
+            # Sync all jobs to session_state
+            try:
+                if "processing_jobs" not in st.session_state:
+                    st.session_state.processing_jobs = {}
+                
+                # Merge local storage into session_state
+                for job_id, job_data in self.jobs.items():
+                    st.session_state.processing_jobs[job_id] = job_data
+            except Exception as e:
+                logger.debug(f"Could not sync all jobs to session_state: {e}")
+            
+            return self.jobs.copy()

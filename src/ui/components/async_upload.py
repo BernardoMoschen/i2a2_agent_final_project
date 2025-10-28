@@ -19,6 +19,35 @@ def render_async_upload_tab():
     """Render async upload tab with real-time progress and auto-tuned parallelism."""
 
     st.header("⚡ Upload de Documentos Fiscais")
+    
+    # Aviso sobre job em background
+    if "current_job_id" in st.session_state:
+        processor = AsyncProcessor()
+        job = processor.get_job_status(st.session_state.current_job_id)
+        if job and job["status"] == "processing":
+            st.info("⏳ **Processamento ativo**. Você pode navegar livremente entre as abas. O processamento continua em background.", icon="📋")
+    
+    # File uploader
+
+import logging
+import time
+from datetime import datetime
+
+import streamlit as st
+
+from src.ui.async_processor import AsyncProcessor
+from src.utils.file_processing import format_classification, format_validation_issues
+
+logger = logging.getLogger(__name__)
+
+
+def render_async_upload_tab():
+    """Render async upload tab with real-time progress and auto-tuned parallelism."""
+
+    st.header("⚡ Upload de Documentos Fiscais")
+    
+    # Container fixo para evitar scroll jump durante updates
+    progress_container = st.empty()
 
 
     # File uploader
@@ -33,8 +62,19 @@ def render_async_upload_tab():
     if not uploaded_files:
         st.info("👆 Selecione um ou mais arquivos para começar")
         
-        # Show active jobs if any
+        # Show active jobs if any (mesmo sem upload novo)
         _show_active_jobs()
+        
+        # Verificar se há job ativo em processamento
+        if "current_job_id" in st.session_state:
+            processor = AsyncProcessor()
+            job = processor.get_job_status(st.session_state.current_job_id)
+            if job and job["status"] == "processing":
+                st.divider()
+                st.warning("⚠️ **Há um processamento em andamento**. Você pode navegar para outras abas enquanto aguarda.")
+                with st.container():
+                    render_job_progress(st.session_state.current_job_id)
+        
         return
 
     # Count XMLs (including those inside ZIPs)
@@ -105,10 +145,61 @@ def render_async_upload_tab():
         time.sleep(0.5)
         st.rerun()
 
-    # Show current job progress
+    # Show current job progress usando progress monitor (sem st.rerun)
     if "current_job_id" in st.session_state:
         st.divider()
-        render_job_progress(st.session_state.current_job_id)
+        
+        from src.ui.components.progress_monitor import create_progress_monitor
+        
+        # Este monitor atualiza automaticamente usando placeholders (não bloqueia UI)
+        final_status = create_progress_monitor(st.session_state.current_job_id)
+        
+        # Mostrar resultados finais
+        if final_status and final_status["status"] == "completed":
+            _show_job_results(final_status)
+            
+            # Limpar job ID após visualização
+            if st.button("🗑️ Limpar resultados"):
+                del st.session_state.current_job_id
+                st.rerun()
+
+
+
+
+def _show_job_results(job: dict):
+    """Show completed job results with tabs for success vs errors."""
+    
+    st.divider()
+    st.success(f"✅ Processamento concluído: {job['successful']} sucessos, {job['failed']} falhas")
+    
+    # Time summary
+    if job.get("completed_at"):
+        total_time = (job["completed_at"] - job["started_at"]).total_seconds()
+        st.caption(f"⏱️ Tempo total: {total_time:.1f}s ({total_time/60:.1f} min)")
+    
+    # Tabs for success vs errors
+    tab1, tab2 = st.tabs(
+        [
+            f"✅ Documentos Processados ({job['successful']})",
+            f"❌ Erros ({job['failed']})",
+        ]
+    )
+
+    with tab1:
+        if job.get("results"):
+            for result in job["results"]:
+                _render_success_result(result)
+        else:
+            st.info("Nenhum documento processado com sucesso")
+
+    with tab2:
+        if job.get("errors"):
+            for error in job["errors"]:
+                st.error(
+                    f"**{error['file']}** (índice {error['index']}): {error['error']}"
+                )
+        else:
+            st.success("Nenhum erro encontrado! 🎉")
 
 
 def render_job_progress(job_id: str):
@@ -130,14 +221,17 @@ def render_job_progress(job_id: str):
 
     # Status badge
     status = job["status"]
-    if status == "processing":
-        st.info("⏳ Processando em background...")
-    elif status == "completed":
-        st.success("✅ Processamento concluído!")
-    elif status == "cancelled":
-        st.warning("⚠️ Processamento cancelado")
-    else:
-        st.error(f"❌ Status: {status}")
+    status_container = st.empty()
+    
+    with status_container.container():
+        if status == "processing":
+            st.info("⏳ Processando em background... (a interface continua utilizável)", icon="ℹ️")
+        elif status == "completed":
+            st.success("✅ Processamento concluído!")
+        elif status == "cancelled":
+            st.warning("⚠️ Processamento cancelado")
+        else:
+            st.error(f"❌ Status: {status}")
 
     # Progress bar
     progress = job["processed"] / job["total"] if job["total"] > 0 else 0
@@ -180,10 +274,10 @@ def render_job_progress(job_id: str):
             f"⏱️ Decorrido: {elapsed:.1f}s | Restante: ~{remaining:.0f}s"
         )
 
-    # Auto-refresh while processing
+    # Auto-refresh while processing (com intervalo maior para reduzir flickering)
     if status == "processing":
-        with st.spinner("Atualizando..."):
-            time.sleep(1)
+        # Atualizar a cada 3 segundos em vez de 1 (mais suave)
+        time.sleep(3)
         st.rerun()
 
     # Results section (only when completed)
