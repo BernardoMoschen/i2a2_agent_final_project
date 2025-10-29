@@ -1476,3 +1476,245 @@ class DatabaseManager:
                 "error_rate": round((error_count / doc_count * 100), 2) if doc_count > 0 else 0,
                 "warning_rate": round((warning_count / doc_count * 100), 2) if doc_count > 0 else 0,
             }
+
+    def get_remediation_suggestions(self, year: Optional[int] = None, month: Optional[int] = None, limit: int = 10) -> dict:
+        """
+        Get remediation suggestions for most common validation issues.
+        
+        Maps error codes to recommended actions and provides a prioritized list
+        of fixes based on frequency and impact.
+        
+        Args:
+            year: Optional filter by year
+            month: Optional filter by month
+            limit: Max number of suggestions to return (default 10)
+            
+        Returns:
+            Dictionary with suggestions sorted by impact (frequency * severity weight)
+        """
+        try:
+            # Query the most common issues with context
+            query = self.session.query(
+                ValidationIssueDB.code,
+                ValidationIssueDB.severity,
+                ValidationIssueDB.message,
+                func.count(ValidationIssueDB.id).label("frequency")
+            )
+            
+            if year:
+                query = query.join(InvoiceDB).filter(
+                    extract("year", InvoiceDB.date) == year
+                )
+                if month:
+                    query = query.filter(extract("month", InvoiceDB.date) == month)
+            
+            query = query.group_by(
+                ValidationIssueDB.code,
+                ValidationIssueDB.severity,
+                ValidationIssueDB.message
+            ).order_by(func.count(ValidationIssueDB.id).desc())
+            
+            issues = query.limit(limit).all()
+            
+            # Map error codes to remediation actions
+            REMEDIATION_MAP = {
+                # Tax issues
+                "INVALID_TAX_RATE": {
+                    "action": "Verify tax calculation",
+                    "steps": ["Check ICMS/IPI/PIS rates", "Validate against state and federal rules", "Review CST code"],
+                    "priority": "high"
+                },
+                "TAX_MISMATCH": {
+                    "action": "Reconcile declared vs calculated taxes",
+                    "steps": ["Recalculate taxes from items", "Check rounding rules", "Verify tax base"],
+                    "priority": "high"
+                },
+                "TOTAL_MISMATCH": {
+                    "action": "Reconcile invoice totals",
+                    "steps": ["Sum all item values", "Add taxes correctly", "Check for deductions"],
+                    "priority": "critical"
+                },
+                # Classification issues
+                "INVALID_CFOP": {
+                    "action": "Correct CFOP code",
+                    "steps": ["Verify operation type", "Check CFOP validity for state", "Review fiscal situation"],
+                    "priority": "high"
+                },
+                "INVALID_OPERATION_TYPE": {
+                    "action": "Set correct operation type",
+                    "steps": ["Identify if purchase/sale/transfer", "Classify correctly in system"],
+                    "priority": "high"
+                },
+                # Item/product issues
+                "INVALID_NCM": {
+                    "action": "Validate NCM code",
+                    "steps": ["Check NCM format (8 digits)", "Verify product classification", "Update product catalog"],
+                    "priority": "medium"
+                },
+                "MISSING_ITEM_DATA": {
+                    "action": "Complete item information",
+                    "steps": ["Add product code", "Include quantity/unit", "Provide unit price"],
+                    "priority": "high"
+                },
+                # CNPJ/document issues
+                "INVALID_CNPJ": {
+                    "action": "Fix CNPJ format",
+                    "steps": ["Validate CNPJ syntax", "Check digit verification", "Update company data"],
+                    "priority": "critical"
+                },
+                "INVALID_IE": {
+                    "action": "Fix State Registration",
+                    "steps": ["Verify IE format", "Check state rules", "Update company data"],
+                    "priority": "medium"
+                },
+                # Quantity/value issues
+                "QUANTITY_UNIT_MISMATCH": {
+                    "action": "Fix quantity and unit",
+                    "steps": ["Verify item quantity", "Check unit of measure", "Recalculate total"],
+                    "priority": "medium"
+                },
+                "VALUE_PRECISION_ERROR": {
+                    "action": "Fix value precision",
+                    "steps": ["Use correct decimal places", "Apply rounding rules", "Recalculate totals"],
+                    "priority": "medium"
+                },
+            }
+            
+            suggestions = []
+            for code, severity, message, frequency in issues:
+                # Calculate impact score (frequency * severity weight)
+                severity_weight = {"error": 3, "warning": 1}.get(severity, 1)
+                impact = frequency * severity_weight
+                
+                # Get remediation or use generic
+                remedy = REMEDIATION_MAP.get(code, {
+                    "action": f"Investigate {code}",
+                    "steps": ["Review error message", "Consult documentation", "Contact support if needed"],
+                    "priority": "low"
+                })
+                
+                suggestions.append({
+                    "code": code,
+                    "frequency": frequency,
+                    "severity": severity,
+                    "impact_score": impact,
+                    "sample_message": message,
+                    "remediation": {
+                        "action": remedy["action"],
+                        "steps": remedy["steps"],
+                        "priority": remedy["priority"]
+                    }
+                })
+            
+            # Sort by impact
+            suggestions.sort(key=lambda x: x["impact_score"], reverse=True)
+            
+            period = f"{year}-{month:02d}" if year and month else f"{year}" if year else "all time"
+            
+            return {
+                "period": period,
+                "total_suggestions": len(suggestions),
+                "suggestions": suggestions
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating remediation suggestions: {e}")
+            return {"period": "unknown", "total_suggestions": 0, "suggestions": [], "error": str(e)}
+
+    def analyze_trends(self, months_back: int = 12) -> dict:
+        """
+        Analyze validation issue trends over time.
+        
+        Shows monthly aggregation of errors/warnings and trend direction
+        (increasing/decreasing/stable).
+        
+        Args:
+            months_back: Number of months to analyze (default 12)
+            
+        Returns:
+            Dictionary with monthly trends and aggregate statistics
+        """
+        try:
+            from datetime import datetime, timedelta
+            
+            # Calculate start date
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30 * months_back)
+            
+            # Query monthly aggregation
+            monthly_stats = self.session.query(
+                extract("year", InvoiceDB.date).label("year"),
+                extract("month", InvoiceDB.date).label("month"),
+                func.count(InvoiceDB.id).label("document_count"),
+                func.count(case(
+                    (ValidationIssueDB.severity == "error", 1),
+                    else_=None
+                )).label("error_count"),
+                func.count(case(
+                    (ValidationIssueDB.severity == "warning", 1),
+                    else_=None
+                )).label("warning_count"),
+            ).outerjoin(
+                ValidationIssueDB,
+                InvoiceDB.id == ValidationIssueDB.invoice_id
+            ).filter(
+                InvoiceDB.date >= start_date
+            ).group_by(
+                extract("year", InvoiceDB.date),
+                extract("month", InvoiceDB.date)
+            ).order_by(
+                extract("year", InvoiceDB.date),
+                extract("month", InvoiceDB.date)
+            ).all()
+            
+            trends = []
+            for year, month, doc_count, error_count, warning_count in monthly_stats:
+                if doc_count == 0:
+                    continue
+                    
+                error_rate = (error_count / doc_count * 100) if doc_count > 0 else 0
+                warning_rate = (warning_count / doc_count * 100) if doc_count > 0 else 0
+                
+                trends.append({
+                    "period": f"{int(year)}-{int(month):02d}",
+                    "documents": int(doc_count),
+                    "errors": int(error_count),
+                    "warnings": int(warning_count),
+                    "error_rate": round(error_rate, 2),
+                    "warning_rate": round(warning_rate, 2),
+                    "total_issues": int(error_count + warning_count)
+                })
+            
+            # Analyze trend direction
+            if len(trends) >= 2:
+                # Compare first and last
+                first_error_rate = trends[0]["error_rate"]
+                last_error_rate = trends[-1]["error_rate"]
+                
+                if last_error_rate > first_error_rate * 1.1:  # 10% increase
+                    trend_direction = "📈 INCREASING (Quality Degrading)"
+                elif last_error_rate < first_error_rate * 0.9:  # 10% decrease
+                    trend_direction = "📉 DECREASING (Quality Improving)"
+                else:
+                    trend_direction = "➡️ STABLE"
+                
+                # Calculate average rate for the period
+                avg_error_rate = sum(t["error_rate"] for t in trends) / len(trends)
+            else:
+                trend_direction = "📊 INSUFFICIENT DATA"
+                avg_error_rate = trends[0]["error_rate"] if trends else 0
+            
+            return {
+                "months_analyzed": months_back,
+                "data_points": len(trends),
+                "trend_direction": trend_direction,
+                "average_error_rate": round(avg_error_rate, 2),
+                "first_period": trends[0]["period"] if trends else None,
+                "last_period": trends[-1]["period"] if trends else None,
+                "monthly_data": trends
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing trends: {e}")
+            return {"months_analyzed": months_back, "data_points": 0, "monthly_data": [], "error": str(e)}
+

@@ -806,6 +806,200 @@ Período: {'Year ' + str(year) if year else 'all time'}
         return self._run(year=year)
 
 
+class RemediationSuggestionsInput(BaseModel):
+    """Input schema for remediation suggestions."""
+    
+    year: Optional[int] = Field(None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(None, description="Month to filter by (1-12)")
+    limit: int = Field(10, description="Max number of suggestions (default 10)")
+
+
+class RemediationTool(BaseTool):
+    """Tool for getting remediation suggestions for validation issues."""
+
+    name: str = "get_remediation_suggestions"
+    description: str = """
+    Get remediation suggestions for the most common validation issues.
+    
+    Use this when user asks:
+    - "Como corrigir os erros?"
+    - "Quais ações tomar para resolver os problemas?"
+    - "Sugestões de remediação"
+    - "Como melhorar a qualidade?"
+    
+    Returns: Prioritized list of issues with recommended actions and steps to fix.
+    """
+    args_schema: type[BaseModel] = RemediationSuggestionsInput
+
+    def _run(
+        self, 
+        year: Optional[int] = None, 
+        month: Optional[int] = None,
+        limit: int = 10
+    ) -> str:
+        """Get remediation suggestions."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            suggestions = db.get_remediation_suggestions(year=year, month=month, limit=limit)
+            
+            if suggestions.get("error"):
+                return f"❌ Erro ao gerar sugestões: {suggestions['error']}"
+            
+            if not suggestions.get("suggestions"):
+                return f"""
+❌ **Nenhuma sugestão de remediação disponível**
+
+Período: {suggestions['period']}
+"""
+            
+            result = f"""
+🔧 **Sugestões de Remediação para Problemas de Validação**
+
+**Período:** {suggestions['period']}
+**Total de Sugestões:** {suggestions['total_suggestions']}
+
+"""
+            
+            for idx, suggestion in enumerate(suggestions["suggestions"], 1):
+                priority_emoji = {
+                    "critical": "🔴",
+                    "high": "🟠",
+                    "medium": "🟡",
+                    "low": "🟢"
+                }.get(suggestion["remediation"]["priority"], "⚪")
+                
+                severity_icon = "❌" if suggestion["severity"] == "error" else "⚠️"
+                
+                result += f"""
+{idx}. **{suggestion['code']}** {severity_icon}
+   📊 Frequência: {suggestion['frequency']}x
+   🎯 Ação: {suggestion['remediation']['action']}
+   {priority_emoji} Prioridade: {suggestion['remediation']['priority'].upper()}
+   📌 Exemplo: {suggestion['sample_message'][:80]}...
+   
+   **Passos para Corrigir:**
+"""
+                for step_idx, step in enumerate(suggestion["remediation"]["steps"], 1):
+                    result += f"      {step_idx}. {step}\n"
+                
+                result += "\n"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting remediation suggestions: {e}")
+            return f"❌ Erro ao gerar sugestões de remediação: {str(e)}"
+
+    async def _arun(
+        self, 
+        year: Optional[int] = None, 
+        month: Optional[int] = None,
+        limit: int = 10
+    ) -> str:
+        """Async version."""
+        return self._run(year=year, month=month, limit=limit)
+
+
+class TrendsAnalysisInput(BaseModel):
+    """Input schema for trends analysis."""
+    
+    months_back: int = Field(12, description="Number of months to analyze (default 12)")
+
+
+class TrendsTool(BaseTool):
+    """Tool for analyzing validation issue trends over time."""
+
+    name: str = "analyze_validation_trends"
+    description: str = """
+    Analyze trends in validation issues over time (monthly aggregation).
+    
+    Use this when user asks:
+    - "Os erros estão aumentando ou diminuindo?"
+    - "Qual é a tendência de qualidade?"
+    - "Análise de tendências de problemas"
+    - "Evolução da qualidade dos documentos"
+    - "Problemas estão melhorando?"
+    
+    You can optionally specify number of months to analyze (default 12).
+    
+    Returns: Monthly aggregation of errors/warnings with trend direction.
+    """
+    args_schema: type[BaseModel] = TrendsAnalysisInput
+
+    def _run(self, months_back: int = 12) -> str:
+        """Analyze trends."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            trends = db.analyze_trends(months_back=months_back)
+            
+            if trends.get("error"):
+                return f"❌ Erro ao analisar tendências: {trends['error']}"
+            
+            if trends["data_points"] == 0:
+                return f"""
+❌ **Dados insuficientes para análise de tendências**
+
+Meses analisados: {months_back}
+"""
+            
+            result = f"""
+📈 **Análise de Tendências de Problemas de Validação**
+
+**Período:** {trends['first_period']} até {trends['last_period']}
+**Meses Analisados:** {trends['months_analyzed']}
+**Pontos de Dados:** {trends['data_points']}
+
+{trends['trend_direction']}
+
+📊 **Taxa Média de Erro:** {trends['average_error_rate']}%
+
+**Dados Mensais:**
+
+"""
+            
+            for month_data in trends["monthly_data"]:
+                # Visual bar representation
+                error_bar = "█" * int(month_data["error_rate"] / 2)
+                
+                result += f"""
+**{month_data['period']}**
+   📄 Documentos: {month_data['documents']}
+   🔴 Erros: {month_data['errors']}
+   🟡 Avisos: {month_data['warnings']}
+   📊 Taxa de Erro: {month_data['error_rate']}% {error_bar}
+"""
+            
+            # Analysis
+            if trends["data_points"] >= 2:
+                first = trends["monthly_data"][0]
+                last = trends["monthly_data"][-1]
+                
+                change = last["error_rate"] - first["error_rate"]
+                pct_change = (change / first["error_rate"] * 100) if first["error_rate"] > 0 else 0
+                
+                result += f"""
+**📊 Análise:**
+   Primeira medição: {first['period']} ({first['error_rate']}%)
+   Última medição: {last['period']} ({last['error_rate']}%)
+   Mudança: {change:+.2f}pp ({pct_change:+.1f}%)
+"""
+                
+                if change < -0.5:
+                    result += "   ✅ **POSITIVO**: Qualidade está melhorando!\n"
+                elif change > 0.5:
+                    result += "   ⚠️ **NEGATIVO**: Qualidade está piorando. Investigar!\n"
+                else:
+                    result += "   ➡️ **ESTÁVEL**: Qualidade mantém-se consistente.\n"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing trends: {e}")
+            return f"❌ Erro ao analisar tendências: {str(e)}"
+
+    async def _arun(self, months_back: int = 12) -> str:
+        """Async version."""
+        return self._run(months_back=months_back)
 
 
 # Tool instances
@@ -818,6 +1012,8 @@ validation_analysis_tool = ValidationAnalysisTool()
 issuer_analysis_tool = IssuerAnalysisTool()
 operation_analysis_tool = OperationAnalysisTool()
 data_quality_tool = DataQualityTool()
+remediation_tool = RemediationTool()
+trends_tool = TrendsTool()
 
 # Import business tools
 from src.agent.business_tools import ALL_BUSINESS_TOOLS
@@ -838,6 +1034,8 @@ ALL_TOOLS = [
     issuer_analysis_tool,               # New: SPRINT 1 - analyze by issuer
     operation_analysis_tool,            # New: SPRINT 1 - compare by operation type
     data_quality_tool,                  # New: SPRINT 1 - overall quality metrics
+    remediation_tool,                   # New: SPRINT 1 - remediation suggestions
+    trends_tool,                        # New: SPRINT 1 - trend analysis
     fiscal_report_export_tool,          # CSV/XLSX file export for download
     *ALL_BUSINESS_TOOLS,                # Includes 'generate_report' for interactive charts
     *ALL_ARCHIVER_TOOLS,
