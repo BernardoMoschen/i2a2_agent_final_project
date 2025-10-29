@@ -2,6 +2,12 @@
 
 An LLM-backed intelligent agent for automated processing, validation, classification, and archiving of Brazilian fiscal XML documents (NFe, NFCe, CTe, MDF-e).
 
+[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-black)](https://github.com/BernardoMoschen/i2a2_agent_final_project)
+
+> **Open Source** | **MIT Licensed** | **Community Driven**
+
 ## Features
 
 - **XML Parsing & Normalization**: Safe parsing of fiscal XMLs with defusedxml, producing normalized Pydantic models
@@ -53,12 +59,14 @@ projeto_final/
 ### Local Development
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/BernardoMoschen/i2a2_agent_final_project.git
 cd i2a2_agent_final_project
 ```
 
 2. Create virtual environment:
+
 ```bash
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
@@ -67,17 +75,20 @@ venv\Scripts\activate  # Windows
 ```
 
 3. Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 4. Configure secrets:
+
 ```bash
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 # Edit .streamlit/secrets.toml and add your GEMINI_API_KEY
 ```
 
 5. Run Streamlit app:
+
 ```bash
 streamlit run src/ui/app.py
 ```
@@ -91,10 +102,12 @@ streamlit run src/ui/app.py
 3. **Click** "New app" and select your repo
 
 4. **Configure**:
+
    - Main file path: `src/ui/app.py`
    - Python version: 3.11
 
 5. **Add Secrets** (Settings → Secrets):
+
    ```toml
    GEMINI_API_KEY = "your-api-key-here"
    ENABLE_API_VALIDATION = true
@@ -103,8 +116,9 @@ streamlit run src/ui/app.py
 6. **Deploy** - Done! 🚀
 
 The app will:
+
 - ✅ Auto-download NCM table from APIs (7-day cache)
-- ✅ Auto-validate CNPJs via BrasilAPI  
+- ✅ Auto-validate CNPJs via BrasilAPI
 - ✅ Auto-validate CEPs via ViaCEP
 - ✅ Create cache directories automatically
 - ✅ No manual file setup needed!
@@ -206,10 +220,38 @@ mypy src/
 3. Lint: `ruff check src/ tests/`
 4. Type check: `mypy src/`
 
-## License
+## 📜 License
 
-Proprietary - i2a2 Final Project
+**MIT License** ©️ 2025 Bernardo Moschen
+
+This project is open source and available under the MIT License. See the [LICENSE](./LICENSE) file for details.
+
+### What you can do with this project:
+
+✅ Use commercially  
+✅ Modify and distribute  
+✅ Use privately  
+✅ Use in sublicenses
+
+### What you must do:
+
+📋 Include license and copyright notice
+
+### What you cannot do:
+
+❌ Hold the author liable  
+❌ Use trademark rights
+
+For more details, see [MIT License Summary](https://opensource.org/licenses/MIT)
 
 ## Support
 
-For issues or questions, contact the development team.
+For issues, questions, or contributions, please:
+
+- 🐛 Report bugs on [GitHub Issues](https://github.com/BernardoMoschen/i2a2_agent_final_project/issues)
+- 💬 Start a discussion for questions
+- 🔀 Submit pull requests for improvements
+
+---
+
+**Made with ❤️ by Bernardo Moschen**
