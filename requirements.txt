@@ -15,6 +15,7 @@ lxml>=5.0.0
 # Data Processing and Reporting
 pandas>=2.1.0
 openpyxl>=3.1.0
+xlsxwriter>=3.1.0
 matplotlib>=3.8.0
 seaborn>=0.13.0
 plotly>=5.18.0
