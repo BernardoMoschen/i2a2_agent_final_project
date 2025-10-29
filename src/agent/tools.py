@@ -1,11 +1,12 @@
 """LangChain tool wrappers for fiscal document processing."""
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Optional
 
 from langchain.tools import BaseTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from src.database.db import DatabaseManager
 from src.models import InvoiceModel, ValidationIssue
@@ -13,6 +14,36 @@ from src.tools.fiscal_validator import FiscalValidatorTool
 from src.tools.xml_parser import XMLParserTool
 
 logger = logging.getLogger(__name__)
+
+
+class RobustBaseTool(BaseTool):
+    """Custom BaseTool that handles JSON string inputs from LangChain agent."""
+    
+    def _to_args_and_kwargs(self, tool_input: Any, tool_call_id: Optional[str] = None) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """Override to handle string JSON inputs from LangChain ReAct agent."""
+        # If tool_input is a string that looks like JSON, try to parse it
+        if isinstance(tool_input, str):
+            try:
+                tool_input = json.loads(tool_input)
+            except (json.JSONDecodeError, ValueError):
+                # If it's not JSON, pass it as-is
+                pass
+        
+        # Call parent implementation
+        return super()._to_args_and_kwargs(tool_input, tool_call_id)
+    
+    def _parse_input(self, tool_input: Any, tool_call_id: Optional[str] = None) -> Any:
+        """Override _parse_input to handle JSON string inputs."""
+        # If tool_input is a string that looks like JSON, parse it first
+        if isinstance(tool_input, str):
+            try:
+                tool_input = json.loads(tool_input)
+            except (json.JSONDecodeError, ValueError):
+                # If parsing fails, let parent handle it
+                pass
+        
+        # Call parent implementation
+        return super()._parse_input(tool_input, tool_call_id)
 
 
 class ParseXMLInput(BaseModel):
@@ -467,7 +498,7 @@ class AnalyzeValidationIssuesInput(BaseModel):
         str_strip_whitespace = True
 
 
-class ValidationAnalysisTool(BaseTool):
+class ValidationAnalysisTool(RobustBaseTool):
     """Tool for analyzing and reporting on validation issues."""
 
     name: str = "analyze_validation_issues"
@@ -565,8 +596,8 @@ class AnalyzeIssuesByIssuerInput(BaseModel):
         str_strip_whitespace = True
 
 
-class IssuerAnalysisTool(BaseTool):
-    """Tool for analyzing validation issues grouped by issuer/supplier."""
+class IssuerAnalysisTool(RobustBaseTool):
+    """Tool for analyzing validation issues by issuer."""
 
     name: str = "analyze_issues_by_issuer"
     description: str = """
@@ -642,8 +673,8 @@ class AnalyzeIssuesByOperationInput(BaseModel):
         str_strip_whitespace = True
 
 
-class OperationAnalysisTool(BaseTool):
-    """Tool for comparing validation issues across operation types."""
+class OperationAnalysisTool(RobustBaseTool):
+    """Tool for analyzing validation issues by operation type."""
 
     name: str = "analyze_issues_by_operation"
     description: str = """
@@ -738,7 +769,7 @@ class DataQualityScoreInput(BaseModel):
         str_strip_whitespace = True
 
 
-class DataQualityTool(BaseTool):
+class DataQualityTool(RobustBaseTool):
     """Tool for calculating overall data quality metrics."""
 
     name: str = "calculate_data_quality"
@@ -834,7 +865,7 @@ class RemediationSuggestionsInput(BaseModel):
         str_strip_whitespace = True
 
 
-class RemediationTool(BaseTool):
+class RemediationTool(RobustBaseTool):
     """Tool for getting remediation suggestions for validation issues."""
 
     name: str = "get_remediation_suggestions"
@@ -930,7 +961,7 @@ class TrendsAnalysisInput(BaseModel):
         str_strip_whitespace = True
 
 
-class TrendsTool(BaseTool):
+class TrendsTool(RobustBaseTool):
     """Tool for analyzing validation issue trends over time."""
 
     name: str = "analyze_validation_trends"
