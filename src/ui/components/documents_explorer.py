@@ -531,10 +531,10 @@ def render_documents_explorer(db: DatabaseManager) -> None:
         # Export selected as CSV
         if selected_keys:
             export_df = edited_df[edited_df["Select"] == True].drop(columns=["Select"])  # type: ignore
-            csv = export_df.to_csv(index=False).encode("utf-8")
+            csv_data = export_df.to_csv(index=False).encode("utf-8")
             st.download_button(
                 "⬇️ Export selected (CSV)",
-                data=csv,
+                data=csv_data,
                 file_name="documents_export.csv",
                 mime="text/csv",
                 key="explorer_export_csv",
