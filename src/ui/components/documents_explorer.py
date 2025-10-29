@@ -28,7 +28,8 @@ DATE_PRESETS = [
 
 def _filters_ui() -> Dict:
     """Render filters and return a dict for DB queries."""
-    st.subheader("🔍 Filters" divider=true)
+    st.subheader("🔍 Filters", divider=True)
+    st.caption("Fast filtering, server-side pagination, selection and export")
     # Global text search (issuer/recipient names, item descriptions)
     q = st.text_input(
         "Full-text search (issuer/recipient/items)",
@@ -185,15 +186,11 @@ def _to_rows(invoices: List[InvoiceDB]) -> pd.DataFrame:
 
 
 def render_documents_explorer(db: DatabaseManager) -> None:
-    """Render the Documents explorer v2."""
-    st.header("📋 Documents Explorer v2")
-    st.caption("Fast filtering, server-side pagination, selection and export")
-
     # Filters
     filters = _filters_ui()
 
     # Pagination controls
-    st.subheader("📄 Pagination")
+    st.subheader("📄 Pagination", divider='gray')
     c1, c2, c3 = st.columns(3)
     with c1:
         page_size = st.selectbox("Per page", options=[10, 25, 50, 100], index=1, key="explorer_page_size")

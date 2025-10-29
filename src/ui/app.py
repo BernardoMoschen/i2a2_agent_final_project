@@ -199,8 +199,6 @@ def main() -> None:
 
     # ============= DOCUMENTS TAB =============
     with tab_documents:
-        st.header("📄 Documents")
-
         # Upload Section - compact and collapsed by default
         with st.expander("⬆️ Upload Fiscal Documents", expanded=False):
             st.caption("Upload single XMLs, multiple files, or ZIP archives (NFe, NFCe, CTe, MDFe)")
@@ -208,7 +206,6 @@ def main() -> None:
             render_async_upload_tab()
 
         # Explorer section - main focus
-        st.subheader("🔍 Browse & Search")
         from src.ui.components.documents_explorer import render_documents_explorer
         
         db_docs = get_cached_db(db_path)
@@ -226,8 +223,6 @@ def main() -> None:
 
     # ============= STATISTICS TAB =============
     with tab_statistics:
-        st.header("📊 Statistics & Overview")
-
         # Database statistics
         try:
             db_stats_mgr = get_cached_db(db_path)
