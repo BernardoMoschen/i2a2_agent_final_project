@@ -459,8 +459,12 @@ class DatabaseStatsTool(BaseTool):
 class AnalyzeValidationIssuesInput(BaseModel):
     """Input schema for analyzing validation issues."""
     
-    year: Optional[int] = Field(None, description="Year to filter by (e.g., 2024)")
-    month: Optional[int] = Field(None, description="Month to filter by (1-12), requires year")
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12), requires year")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
 
 
 class ValidationAnalysisTool(BaseTool):
@@ -553,8 +557,12 @@ Isso significa que todos os documentos foram validados com sucesso! 🎉
 class AnalyzeIssuesByIssuerInput(BaseModel):
     """Input schema for analyzing issues by issuer."""
     
-    year: Optional[int] = Field(None, description="Year to filter by (e.g., 2024)")
-    month: Optional[int] = Field(None, description="Month to filter by (1-12)")
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12)")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
 
 
 class IssuerAnalysisTool(BaseTool):
@@ -626,8 +634,12 @@ Período: {analysis.get('period', 'all time')}
 class AnalyzeIssuesByOperationInput(BaseModel):
     """Input schema for analyzing issues by operation type."""
     
-    year: Optional[int] = Field(None, description="Year to filter by (e.g., 2024)")
-    month: Optional[int] = Field(None, description="Month to filter by (1-12)")
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12)")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
 
 
 class OperationAnalysisTool(BaseTool):
@@ -719,7 +731,11 @@ Período: {analysis.get('period', 'all time')}
 class DataQualityScoreInput(BaseModel):
     """Input schema for data quality score."""
     
-    year: Optional[int] = Field(None, description="Year to analyze (e.g., 2024). If None, uses all data.")
+    year: Optional[int] = Field(default=None, description="Year to analyze (e.g., 2024). If None, uses all data.")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
 
 
 class DataQualityTool(BaseTool):
@@ -809,9 +825,13 @@ Período: {'Year ' + str(year) if year else 'all time'}
 class RemediationSuggestionsInput(BaseModel):
     """Input schema for remediation suggestions."""
     
-    year: Optional[int] = Field(None, description="Year to filter by (e.g., 2024)")
-    month: Optional[int] = Field(None, description="Month to filter by (1-12)")
-    limit: int = Field(10, description="Max number of suggestions (default 10)")
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12)")
+    limit: int = Field(default=10, description="Max number of suggestions (default 10)")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
 
 
 class RemediationTool(BaseTool):
@@ -903,7 +923,11 @@ Período: {suggestions['period']}
 class TrendsAnalysisInput(BaseModel):
     """Input schema for trends analysis."""
     
-    months_back: int = Field(12, description="Number of months to analyze (default 12)")
+    months_back: int = Field(default=12, description="Number of months to analyze (default 12)")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
 
 
 class TrendsTool(BaseTool):
