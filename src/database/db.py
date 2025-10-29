@@ -1185,3 +1185,294 @@ class DatabaseManager:
                 "common_issues": common_issues,
                 "by_severity": severity_counts,
             }
+
+    def get_validation_issues_by_issuer(
+        self,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+        limit: int = 20,
+    ) -> dict:
+        """
+        Analyze validation issues grouped by issuer/emitente.
+        
+        Args:
+            year: Filter by year (e.g., 2024)
+            month: Filter by month (1-12), requires year
+            limit: Maximum number of issuers to return
+            
+        Returns:
+            Dictionary with analysis per issuer
+        """
+        with Session(self.engine) as session:
+            # Build base query
+            query = (
+                select(
+                    InvoiceDB.issuer_cnpj,
+                    InvoiceDB.issuer_name,
+                    InvoiceDB.id.label("invoice_id"),
+                    ValidationIssueDB.code,
+                    ValidationIssueDB.severity,
+                )
+                .outerjoin(ValidationIssueDB)
+            )
+            
+            # Filter by date range if specified
+            if year is not None:
+                start_date = datetime(year, month or 1, 1, tzinfo=UTC)
+                if month is not None:
+                    next_month = datetime(
+                        year,
+                        month + 1 if month < 12 else 1,
+                        1,
+                        tzinfo=UTC
+                    )
+                    end_date = next_month - timedelta(days=1)
+                else:
+                    end_date = datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC)
+                
+                query = query.where(
+                    InvoiceDB.issue_date >= start_date,
+                    InvoiceDB.issue_date <= end_date,
+                )
+            
+            results = session.exec(query).all()
+            
+            if not results:
+                return {}
+            
+            # Aggregate by issuer
+            issuer_data = {}
+            
+            for cnpj, name, invoice_id, code, severity in results:
+                if cnpj not in issuer_data:
+                    issuer_data[cnpj] = {
+                        "name": name,
+                        "invoices": set(),
+                        "errors": 0,
+                        "warnings": 0,
+                        "issues": {}
+                    }
+                
+                if invoice_id:
+                    issuer_data[cnpj]["invoices"].add(invoice_id)
+                
+                if code:
+                    if severity == "error":
+                        issuer_data[cnpj]["errors"] += 1
+                    elif severity == "warning":
+                        issuer_data[cnpj]["warnings"] += 1
+                    
+                    if code not in issuer_data[cnpj]["issues"]:
+                        issuer_data[cnpj]["issues"][code] = 0
+                    issuer_data[cnpj]["issues"][code] += 1
+            
+            # Convert to list and sort by error rate
+            issuer_list = []
+            for cnpj, data in issuer_data.items():
+                invoice_count = len(data["invoices"])
+                total_issues = data["errors"] + data["warnings"]
+                error_rate = (data["errors"] / invoice_count * 100) if invoice_count > 0 else 0
+                
+                top_issues = sorted(
+                    data["issues"].items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:3]
+                
+                issuer_list.append({
+                    "cnpj": cnpj,
+                    "name": data["name"],
+                    "document_count": invoice_count,
+                    "error_count": data["errors"],
+                    "warning_count": data["warnings"],
+                    "total_issues": total_issues,
+                    "error_rate": round(error_rate, 2),
+                    "top_issues": [{"code": code, "count": cnt} for code, cnt in top_issues],
+                })
+            
+            # Sort by error rate descending
+            issuer_list.sort(key=lambda x: x["error_rate"], reverse=True)
+            
+            return {
+                "period": f"{year}/{month:02d}" if month else str(year) if year else "all time",
+                "total_issuers": len(issuer_list),
+                "issuers": issuer_list[:limit]
+            }
+
+    def get_validation_issues_by_operation(
+        self,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ) -> dict:
+        """
+        Compare validation issues across different operation types.
+        
+        Args:
+            year: Filter by year
+            month: Filter by month
+            
+        Returns:
+            Dictionary with analysis by operation type
+        """
+        with Session(self.engine) as session:
+            query = select(
+                InvoiceDB.operation_type,
+                InvoiceDB.id.label("invoice_id"),
+                ValidationIssueDB.code,
+                ValidationIssueDB.severity,
+            ).outerjoin(ValidationIssueDB)
+            
+            # Filter by date
+            if year is not None:
+                start_date = datetime(year, month or 1, 1, tzinfo=UTC)
+                if month is not None:
+                    next_month = datetime(year, month + 1 if month < 12 else 1, 1, tzinfo=UTC)
+                    end_date = next_month - timedelta(days=1)
+                else:
+                    end_date = datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC)
+                
+                query = query.where(
+                    InvoiceDB.issue_date >= start_date,
+                    InvoiceDB.issue_date <= end_date,
+                )
+            
+            results = session.exec(query).all()
+            
+            # Aggregate by operation
+            op_data = {}
+            
+            for operation, invoice_id, code, severity in results:
+                op_type = operation or "unclassified"
+                
+                if op_type not in op_data:
+                    op_data[op_type] = {
+                        "invoices": set(),
+                        "errors": 0,
+                        "warnings": 0,
+                    }
+                
+                if invoice_id:
+                    op_data[op_type]["invoices"].add(invoice_id)
+                
+                if code:
+                    if severity == "error":
+                        op_data[op_type]["errors"] += 1
+                    elif severity == "warning":
+                        op_data[op_type]["warnings"] += 1
+            
+            # Format response
+            result = {}
+            for op_type, data in op_data.items():
+                count = len(data["invoices"])
+                total_issues = data["errors"] + data["warnings"]
+                result[op_type] = {
+                    "document_count": count,
+                    "error_count": data["errors"],
+                    "warning_count": data["warnings"],
+                    "total_issues": total_issues,
+                    "avg_issues_per_doc": round(total_issues / count, 2) if count > 0 else 0,
+                    "error_rate": round((data["errors"] / count * 100), 2) if count > 0 else 0,
+                }
+            
+            return {
+                "period": f"{year}/{month:02d}" if month else str(year) if year else "all time",
+                "by_operation": result
+            }
+
+    def calculate_data_quality_score(
+        self,
+        year: Optional[int] = None,
+    ) -> dict:
+        """
+        Calculate overall data quality metrics (0-100 scale).
+        
+        Args:
+            year: Filter by year, if None uses all data
+            
+        Returns:
+            Dictionary with quality metrics
+        """
+        with Session(self.engine) as session:
+            # Base query
+            query = select(
+                InvoiceDB.id,
+                InvoiceDB.issue_date,
+            )
+            
+            if year:
+                start_date = datetime(year, 1, 1, tzinfo=UTC)
+                end_date = datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC)
+                query = query.where(
+                    InvoiceDB.issue_date >= start_date,
+                    InvoiceDB.issue_date <= end_date,
+                )
+            
+            invoices = session.exec(query).all()
+            
+            if not invoices:
+                return {
+                    "overall_score": 0,
+                    "documents_analyzed": 0,
+                    "metrics": {}
+                }
+            
+            invoice_ids = [inv[0] for inv in invoices]
+            
+            # Count issues
+            issues_query = select(
+                func.count().label("total"),
+                func.sum(case((ValidationIssueDB.severity == "error", 1), else_=0)).label("errors"),
+                func.sum(case((ValidationIssueDB.severity == "warning", 1), else_=0)).label("warnings"),
+            ).where(ValidationIssueDB.invoice_id.in_(invoice_ids))
+            
+            total_issues, error_count, warning_count = session.exec(issues_query).one()
+            
+            total_issues = total_issues or 0
+            error_count = error_count or 0
+            warning_count = warning_count or 0
+            
+            doc_count = len(invoice_ids)
+            
+            # Calculate metrics
+            docs_with_errors = min(doc_count, len(set(
+                session.exec(
+                    select(ValidationIssueDB.invoice_id).where(
+                        (ValidationIssueDB.invoice_id.in_(invoice_ids)) &
+                        (ValidationIssueDB.severity == "error")
+                    ).distinct()
+                ).all()
+            )))
+            
+            docs_with_warnings = min(doc_count, len(set(
+                session.exec(
+                    select(ValidationIssueDB.invoice_id).where(
+                        (ValidationIssueDB.invoice_id.in_(invoice_ids)) &
+                        (ValidationIssueDB.severity == "warning")
+                    ).distinct()
+                ).all()
+            )))
+            
+            # Score calculation
+            completeness = 100  # All docs present
+            accuracy = max(0, 100 - (error_count / max(1, doc_count) * 50))
+            consistency = max(0, 100 - (warning_count / max(1, doc_count) * 30))
+            
+            overall_score = (completeness + accuracy + consistency) / 3
+            
+            return {
+                "overall_score": round(overall_score, 1),
+                "documents_analyzed": doc_count,
+                "documents_with_errors": docs_with_errors,
+                "documents_with_warnings": docs_with_warnings,
+                "documents_clean": doc_count - docs_with_errors - docs_with_warnings,
+                "total_issues": total_issues,
+                "error_count": error_count,
+                "warning_count": warning_count,
+                "metrics": {
+                    "completeness": round(completeness, 1),
+                    "accuracy": round(accuracy, 1),
+                    "consistency": round(consistency, 1),
+                },
+                "error_rate": round((error_count / doc_count * 100), 2) if doc_count > 0 else 0,
+                "warning_rate": round((warning_count / doc_count * 100), 2) if doc_count > 0 else 0,
+            }

@@ -550,6 +550,263 @@ Isso significa que todos os documentos foram validados com sucesso! 🎉
         return self._run(year=year, month=month)
 
 
+class AnalyzeIssuesByIssuerInput(BaseModel):
+    """Input schema for analyzing issues by issuer."""
+    
+    year: Optional[int] = Field(None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(None, description="Month to filter by (1-12)")
+
+
+class IssuerAnalysisTool(BaseTool):
+    """Tool for analyzing validation issues grouped by issuer/supplier."""
+
+    name: str = "analyze_issues_by_issuer"
+    description: str = """
+    Analyze validation issues grouped by issuer (supplier/emitente).
+    
+    Use this when user asks:
+    - "Qual fornecedor tem mais problemas?"
+    - "Ranking de fornecedores por taxa de erro"
+    - "Quais emitentes têm documentos com erros?"
+    - "Análise de qualidade por fornecedor"
+    
+    You can optionally filter by year and month.
+    
+    Returns: Detailed analysis of validation issues per issuer with error rates
+    and top problems for each supplier.
+    """
+    args_schema: type[BaseModel] = AnalyzeIssuesByIssuerInput
+
+    def _run(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Analyze issues by issuer."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            analysis = db.get_validation_issues_by_issuer(year=year, month=month, limit=15)
+            
+            if not analysis or not analysis.get("issuers"):
+                return f"""
+❌ **Nenhum problema de validação encontrado por emitente**
+
+Período: {analysis.get('period', 'all time')}
+"""
+            
+            result = f"""
+📊 **Análise de Problemas de Validação por Emitente**
+
+**Período:** {analysis['period']}
+**Total de Emitentes com Problemas:** {analysis['total_issuers']}
+
+"""
+            
+            for idx, issuer in enumerate(analysis["issuers"], 1):
+                result += f"""
+{idx}. **{issuer['name']}** (CNPJ: {issuer['cnpj']})
+   📄 Documentos: {issuer['document_count']}
+   🔴 Erros: {issuer['error_count']}
+   🟡 Avisos: {issuer['warning_count']}
+   📊 Taxa de Erro: {issuer['error_rate']}%
+"""
+                
+                if issuer['top_issues']:
+                    result += "   Top Problemas: "
+                    result += ", ".join([f"{code}({cnt}x)" for code, cnt in issuer['top_issues']])
+                    result += "\n"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing issues by issuer: {e}")
+            return f"❌ Erro ao analisar problemas por emitente: {str(e)}"
+
+    async def _arun(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Async version."""
+        return self._run(year=year, month=month)
+
+
+class AnalyzeIssuesByOperationInput(BaseModel):
+    """Input schema for analyzing issues by operation type."""
+    
+    year: Optional[int] = Field(None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(None, description="Month to filter by (1-12)")
+
+
+class OperationAnalysisTool(BaseTool):
+    """Tool for comparing validation issues across operation types."""
+
+    name: str = "analyze_issues_by_operation"
+    description: str = """
+    Compare validation issues across different operation types (purchase, sale, transfer, return).
+    
+    Use this when user asks:
+    - "Compras têm mais erros que vendas?"
+    - "Qual tipo de operação tem mais problemas?"
+    - "Comparação de qualidade entre compras e vendas"
+    - "Qual operação fiscal tem mais taxa de erro?"
+    
+    You can optionally filter by year and month.
+    
+    Returns: Comparison of validation metrics across all operation types.
+    """
+    args_schema: type[BaseModel] = AnalyzeIssuesByOperationInput
+
+    def _run(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Analyze issues by operation type."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            analysis = db.get_validation_issues_by_operation(year=year, month=month)
+            
+            if not analysis.get("by_operation"):
+                return f"""
+❌ **Nenhum documento encontrado para análise**
+
+Período: {analysis.get('period', 'all time')}
+"""
+            
+            result = f"""
+📊 **Comparação de Problemas por Tipo de Operação**
+
+**Período:** {analysis['period']}
+
+"""
+            
+            # Sort by error rate
+            sorted_ops = sorted(
+                analysis["by_operation"].items(),
+                key=lambda x: x[1]["error_rate"],
+                reverse=True
+            )
+            
+            for operation, metrics in sorted_ops:
+                op_label = {
+                    "purchase": "📥 COMPRAS",
+                    "sale": "📤 VENDAS",
+                    "transfer": "🔄 TRANSFERÊNCIAS",
+                    "return": "↩️ DEVOLUÇÕES",
+                    "unclassified": "❓ NÃO CLASSIFICADO"
+                }.get(operation, f"📄 {operation.upper()}")
+                
+                result += f"""
+**{op_label}**
+   📄 Documentos: {metrics['document_count']}
+   🔴 Erros: {metrics['error_count']}
+   🟡 Avisos: {metrics['warning_count']}
+   📊 Taxa de Erro: {metrics['error_rate']}%
+   📈 Média de Problemas/Doc: {metrics['avg_issues_per_doc']}
+
+"""
+            
+            # Find best and worst
+            best_op = min(sorted_ops, key=lambda x: x[1]["error_rate"])
+            worst_op = max(sorted_ops, key=lambda x: x[1]["error_rate"])
+            
+            result += f"""
+**📈 Resumo:**
+✅ Melhor: {best_op[0].upper()} ({best_op[1]['error_rate']}% de erro)
+❌ Pior: {worst_op[0].upper()} ({worst_op[1]['error_rate']}% de erro)
+"""
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing issues by operation: {e}")
+            return f"❌ Erro ao analisar por tipo de operação: {str(e)}"
+
+    async def _arun(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Async version."""
+        return self._run(year=year, month=month)
+
+
+class DataQualityScoreInput(BaseModel):
+    """Input schema for data quality score."""
+    
+    year: Optional[int] = Field(None, description="Year to analyze (e.g., 2024). If None, uses all data.")
+
+
+class DataQualityTool(BaseTool):
+    """Tool for calculating overall data quality metrics."""
+
+    name: str = "calculate_data_quality"
+    description: str = """
+    Calculate overall data quality metrics and score (0-100 scale).
+    
+    Use this when user asks:
+    - "Qual é a qualidade dos nossos documentos?"
+    - "Qual % dos documentos tem erros?"
+    - "Score de qualidade dos dados"
+    - "Dashboard de qualidade"
+    - "Como está a integridade dos dados?"
+    
+    Optionally filter by year.
+    
+    Returns: Quality metrics including completeness, accuracy, consistency,
+    and overall quality score.
+    """
+    args_schema: type[BaseModel] = DataQualityScoreInput
+
+    def _run(self, year: Optional[int] = None) -> str:
+        """Calculate data quality score."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            quality = db.calculate_data_quality_score(year=year)
+            
+            if quality["documents_analyzed"] == 0:
+                return f"""
+❌ **Nenhum documento para análise**
+
+Período: {'Year ' + str(year) if year else 'all time'}
+"""
+            
+            # Determine quality level
+            score = quality["overall_score"]
+            if score >= 90:
+                emoji = "🟢"
+                level = "EXCELENTE"
+            elif score >= 80:
+                emoji = "🟡"
+                level = "BOM"
+            elif score >= 70:
+                emoji = "🟠"
+                level = "ACEITÁVEL"
+            else:
+                emoji = "🔴"
+                level = "CRÍTICO"
+            
+            result = f"""
+📊 **Análise de Qualidade de Dados**
+
+**Período:** {'Year ' + str(year) if year else 'all time'}
+
+{emoji} **Score Geral: {quality['overall_score']}/100 ({level})**
+
+**Resumo:**
+- 📄 Documentos Analisados: {quality['documents_analyzed']}
+- ✅ Documentos Sem Problemas: {quality['documents_clean']}
+- 🔴 Documentos com Erros: {quality['documents_with_errors']}
+- 🟡 Documentos com Avisos: {quality['documents_with_warnings']}
+
+**Problemas Detectados:**
+- 🔴 Total de Erros: {quality['error_count']} ({quality['error_rate']}%)
+- 🟡 Total de Avisos: {quality['warning_count']} ({quality['warning_rate']}%)
+- 📊 Total de Problemas: {quality['total_issues']}
+
+**Métricas Detalhadas:**
+- ✅ Completeness: {quality['metrics']['completeness']}/100
+- 🎯 Accuracy: {quality['metrics']['accuracy']}/100
+- 🔗 Consistency: {quality['metrics']['consistency']}/100
+"""
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error calculating data quality: {e}")
+            return f"❌ Erro ao calcular qualidade dos dados: {str(e)}"
+
+    async def _arun(self, year: Optional[int] = None) -> str:
+        """Async version."""
+        return self._run(year=year)
+
+
+
 
 # Tool instances
 parse_xml_tool = ParseXMLTool()
@@ -558,6 +815,9 @@ fiscal_knowledge_tool = FiscalKnowledgeTool()
 database_search_tool = DatabaseSearchTool()
 database_stats_tool = DatabaseStatsTool()
 validation_analysis_tool = ValidationAnalysisTool()
+issuer_analysis_tool = IssuerAnalysisTool()
+operation_analysis_tool = OperationAnalysisTool()
+data_quality_tool = DataQualityTool()
 
 # Import business tools
 from src.agent.business_tools import ALL_BUSINESS_TOOLS
@@ -574,9 +834,12 @@ ALL_TOOLS = [
     fiscal_knowledge_tool,
     database_search_tool,
     database_stats_tool,
-    validation_analysis_tool,  # New: analyze common validation issues
-    fiscal_report_export_tool,  # CSV/XLSX file export for download
-    *ALL_BUSINESS_TOOLS,  # Includes 'generate_report' for interactive charts
+    validation_analysis_tool,           # New: analyze common validation issues
+    issuer_analysis_tool,               # New: SPRINT 1 - analyze by issuer
+    operation_analysis_tool,            # New: SPRINT 1 - compare by operation type
+    data_quality_tool,                  # New: SPRINT 1 - overall quality metrics
+    fiscal_report_export_tool,          # CSV/XLSX file export for download
+    *ALL_BUSINESS_TOOLS,                # Includes 'generate_report' for interactive charts
     *ALL_ARCHIVER_TOOLS,
 ]
 
