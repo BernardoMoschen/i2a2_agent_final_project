@@ -28,7 +28,7 @@ DATE_PRESETS = [
 
 def _filters_ui() -> Dict:
     """Render filters and return a dict for DB queries."""
-    st.subheader("🔍 Filters")
+    st.subheader("🔍 Filters" divider=true)
     # Global text search (issuer/recipient names, item descriptions)
     q = st.text_input(
         "Full-text search (issuer/recipient/items)",
@@ -327,19 +327,19 @@ def render_documents_explorer(db: DatabaseManager) -> None:
                                     items_rows.append({
                                         "Invoice Key": inv.document_key or "",
                                         "Item": it_idx + 1,
-                                        "Code": it.code or "",
+                                        "Code": it.product_code or "",
                                         "Description": it.description or "",
                                         "NCM": it.ncm or "",
                                         "CFOP": it.cfop or "",
                                         "Unit": it.unit or "",
                                         "Quantity": float(it.quantity) if it.quantity else 0.0,
-                                        "Unit Price": float(it.unit_value) if it.unit_value else 0.0,
-                                        "Total Price": float(it.total_value) if it.total_value else 0.0,
-                                        "ICMS": float(it.taxes.icms) if getattr(it, "taxes", None) and getattr(it.taxes, "icms", None) is not None else 0.0,
-                                        "IPI": float(it.taxes.ipi) if getattr(it, "taxes", None) and getattr(it.taxes, "ipi", None) is not None else 0.0,
-                                        "PIS": float(it.taxes.pis) if getattr(it, "taxes", None) and getattr(it.taxes, "pis", None) is not None else 0.0,
-                                        "COFINS": float(it.taxes.cofins) if getattr(it, "taxes", None) and getattr(it.taxes, "cofins", None) is not None else 0.0,
-                                        "ISSQN": float(it.taxes.issqn) if getattr(it, "taxes", None) and getattr(it.taxes, "issqn", None) is not None else 0.0,
+                                        "Unit Price": float(it.unit_price) if it.unit_price else 0.0,
+                                        "Total Price": float(it.total_price) if it.total_price else 0.0,
+                                        "ICMS": float(it.tax_icms) if it.tax_icms else 0.0,
+                                        "IPI": float(it.tax_ipi) if it.tax_ipi else 0.0,
+                                        "PIS": float(it.tax_pis) if it.tax_pis else 0.0,
+                                        "COFINS": float(it.tax_cofins) if it.tax_cofins else 0.0,
+                                        "ISSQN": float(it.tax_issqn) if it.tax_issqn else 0.0,
                                     })
 
                         inv_df = pd.DataFrame(invoices_rows)
