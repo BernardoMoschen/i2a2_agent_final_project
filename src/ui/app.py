@@ -69,7 +69,7 @@ def init_agent(api_key: str) -> None:
             logger.info("Agent initialized successfully")
         except (ValueError, KeyError, RuntimeError) as e:
             logger.error(f"Failed to initialize agent: {e}", exc_info=True)
-            st.error(f"❌ Erro ao inicializar agente: {e}")
+            st.error(f"❌ Error initializing agent: {e}")
             st.session_state.agent = None
 
 
@@ -97,7 +97,7 @@ def get_cached_db(db_path: str) -> database_db.DatabaseManager:
             )
         except (OSError, ValueError, RuntimeError) as e:
             logger.error(f"Failed to initialize database: {e}")
-            st.error(f"❌ Erro ao conectar ao banco de dados: {e}")
+            st.error(f"❌ Error connecting to database: {e}")
             return None
     return st.session_state[db_key]
 
