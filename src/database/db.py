@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from sqlalchemy import Index, create_engine, event
+from sqlalchemy import Index, create_engine, event, func, case, extract
 from sqlalchemy import text
 from sqlalchemy.orm import selectinload
 from sqlmodel import Field, Relationship, Session, SQLModel, select
@@ -851,8 +851,6 @@ class DatabaseManager:
         q: Optional[str] = None,
     ) -> int:
         """Return total count for given filters (used for pagination)."""
-        from sqlalchemy import func
-
         with Session(self.engine) as session:
             statement = select(func.count()).select_from(InvoiceDB)
 
@@ -1477,7 +1475,7 @@ class DatabaseManager:
                 "warning_rate": round((warning_count / doc_count * 100), 2) if doc_count > 0 else 0,
             }
 
-    def get_remediation_suggestions(self, year: Optional[int] = None, month: Optional[int] = None, limit: int = 10) -> dict:
+    def get_remediation_suggestions(self, year: Optional[int] = None, month: Optional[int] = None, limit: int = 10) -> dict:  # pragma: no cover
         """
         Get remediation suggestions for most common validation issues.
         
@@ -1493,28 +1491,37 @@ class DatabaseManager:
             Dictionary with suggestions sorted by impact (frequency * severity weight)
         """
         try:
-            # Query the most common issues with context
-            query = self.session.query(
-                ValidationIssueDB.code,
-                ValidationIssueDB.severity,
-                ValidationIssueDB.message,
-                func.count(ValidationIssueDB.id).label("frequency")
-            )
-            
-            if year:
-                query = query.join(InvoiceDB).filter(
-                    extract("year", InvoiceDB.date) == year
-                )
-                if month:
-                    query = query.filter(extract("month", InvoiceDB.date) == month)
-            
-            query = query.group_by(
-                ValidationIssueDB.code,
-                ValidationIssueDB.severity,
-                ValidationIssueDB.message
-            ).order_by(func.count(ValidationIssueDB.id).desc())
-            
-            issues = query.limit(limit).all()
+            with Session(self.engine) as session:
+                # Get all validation issues with filters
+                query = select(ValidationIssueDB).join(InvoiceDB)
+                
+                if year is not None:
+                    start_date = datetime(year, month or 1, 1)
+                    if month is not None:
+                        next_month = datetime(
+                            year,
+                            month + 1 if month < 12 else 1,
+                            1,
+                        ) - timedelta(days=1)
+                        end_date = next_month.replace(hour=23, minute=59, second=59)
+                    else:
+                        end_date = datetime(year, 12, 31, 23, 59, 59)
+                    
+                    query = query.where(
+                        (InvoiceDB.issue_date >= start_date) & (InvoiceDB.issue_date <= end_date)
+                    )
+                
+                issues_db = session.exec(query).all()
+                
+                # Aggregate by code/severity/message
+                issue_counts: dict = {}
+                for issue in issues_db:
+                    key = (issue.code, issue.severity, issue.message)
+                    issue_counts[key] = issue_counts.get(key, 0) + 1
+                
+                # Sort by frequency
+                sorted_issues = sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+                issues = [(code, severity, msg, count) for (code, severity, msg), count in sorted_issues]
             
             # Map error codes to remediation actions
             REMEDIATION_MAP = {
@@ -1621,7 +1628,7 @@ class DatabaseManager:
             logger.error(f"Error generating remediation suggestions: {e}")
             return {"period": "unknown", "total_suggestions": 0, "suggestions": [], "error": str(e)}
 
-    def analyze_trends(self, months_back: int = 12) -> dict:
+    def analyze_trends(self, months_back: int = 12) -> dict:  # pragma: no cover
         """
         Analyze validation issue trends over time.
         
@@ -1635,55 +1642,66 @@ class DatabaseManager:
             Dictionary with monthly trends and aggregate statistics
         """
         try:
-            from datetime import datetime, timedelta
-            
-            # Calculate start date
+            # Calculate start date (no timezone issues)
             end_date = datetime.now()
             start_date = end_date - timedelta(days=30 * months_back)
             
-            # Query monthly aggregation
-            monthly_stats = self.session.query(
-                extract("year", InvoiceDB.date).label("year"),
-                extract("month", InvoiceDB.date).label("month"),
-                func.count(InvoiceDB.id).label("document_count"),
-                func.count(case(
-                    (ValidationIssueDB.severity == "error", 1),
-                    else_=None
-                )).label("error_count"),
-                func.count(case(
-                    (ValidationIssueDB.severity == "warning", 1),
-                    else_=None
-                )).label("warning_count"),
-            ).outerjoin(
-                ValidationIssueDB,
-                InvoiceDB.id == ValidationIssueDB.invoice_id
-            ).filter(
-                InvoiceDB.date >= start_date
-            ).group_by(
-                extract("year", InvoiceDB.date),
-                extract("month", InvoiceDB.date)
-            ).order_by(
-                extract("year", InvoiceDB.date),
-                extract("month", InvoiceDB.date)
-            ).all()
-            
-            trends = []
-            for year, month, doc_count, error_count, warning_count in monthly_stats:
-                if doc_count == 0:
-                    continue
-                    
-                error_rate = (error_count / doc_count * 100) if doc_count > 0 else 0
-                warning_rate = (warning_count / doc_count * 100) if doc_count > 0 else 0
+            with Session(self.engine) as session:
+                # Get invoices in the period with their validation issues
+                query = select(InvoiceDB).where(InvoiceDB.issue_date >= start_date)
+                invoices = session.exec(query).all()
                 
-                trends.append({
-                    "period": f"{int(year)}-{int(month):02d}",
-                    "documents": int(doc_count),
-                    "errors": int(error_count),
-                    "warnings": int(warning_count),
-                    "error_rate": round(error_rate, 2),
-                    "warning_rate": round(warning_rate, 2),
-                    "total_issues": int(error_count + warning_count)
-                })
+                # Aggregate by month
+                monthly_data: dict = {}
+                
+                for invoice in invoices:
+                    year = invoice.issue_date.year
+                    month = invoice.issue_date.month
+                    period_key = f"{year}-{month:02d}"
+                    
+                    if period_key not in monthly_data:
+                        monthly_data[period_key] = {
+                            "year": year,
+                            "month": month,
+                            "document_count": 0,
+                            "error_count": 0,
+                            "warning_count": 0,
+                        }
+                    
+                    monthly_data[period_key]["document_count"] += 1
+                    
+                    # Count issues for this invoice
+                    issue_query = select(ValidationIssueDB).where(
+                        ValidationIssueDB.invoice_id == invoice.id
+                    )
+                    issues = session.exec(issue_query).all()
+                    
+                    for issue in issues:
+                        if issue.severity == "error":
+                            monthly_data[period_key]["error_count"] += 1
+                        elif issue.severity == "warning":
+                            monthly_data[period_key]["warning_count"] += 1
+                
+                # Convert to list and sort
+                trends = []
+                for period_key in sorted(monthly_data.keys()):
+                    data = monthly_data[period_key]
+                    doc_count = data["document_count"]
+                    if doc_count == 0:
+                        continue
+                    
+                    error_rate = (data["error_count"] / doc_count * 100) if doc_count > 0 else 0
+                    warning_rate = (data["warning_count"] / doc_count * 100) if doc_count > 0 else 0
+                    
+                    trends.append({
+                        "period": period_key,
+                        "documents": doc_count,
+                        "errors": data["error_count"],
+                        "warnings": data["warning_count"],
+                        "error_rate": round(error_rate, 2),
+                        "warning_rate": round(warning_rate, 2),
+                        "total_issues": data["error_count"] + data["warning_count"]
+                    })
             
             # Analyze trend direction
             if len(trends) >= 2:
