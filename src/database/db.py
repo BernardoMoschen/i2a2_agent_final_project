@@ -1072,3 +1072,116 @@ class DatabaseManager:
                 return True
             
             return False
+
+    def get_validation_issue_analysis(
+        self,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+        limit: int = 10,
+    ) -> dict:
+        """
+        Analyze validation issues to find the most common problems.
+        
+        Args:
+            year: Filter by year (e.g., 2024)
+            month: Filter by month (1-12), requires year to be set
+            limit: Maximum number of top issues to return
+            
+        Returns:
+            Dictionary with analysis of common validation issues
+        """
+        with Session(self.engine) as session:
+            # Build query for validation issues
+            query = select(
+                ValidationIssueDB.code,
+                ValidationIssueDB.severity,
+            ).join(InvoiceDB)
+            
+            # Filter by date range if year/month provided
+            if year is not None:
+                start_date = datetime(year, month or 1, 1, tzinfo=UTC)
+                if month is not None:
+                    # Last day of the month
+                    next_month = datetime(
+                        year,
+                        month + 1 if month < 12 else 1,
+                        1,
+                        tzinfo=UTC
+                    ) - timedelta(days=1)
+                    end_date = next_month.replace(hour=23, minute=59, second=59)
+                else:
+                    # Entire year
+                    end_date = datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC)
+                
+                query = query.where(
+                    InvoiceDB.issue_date >= start_date,
+                    InvoiceDB.issue_date <= end_date,
+                )
+            
+            issues = session.exec(query).all()
+            
+            if not issues:
+                return {
+                    "period": f"{year}/{month}" if month else str(year) if year else "all time",
+                    "total_issues": 0,
+                    "common_issues": [],
+                    "by_severity": {},
+                }
+            
+            # Count issues by code and severity
+            issue_counts: dict[str, dict] = {}
+            severity_counts: dict[str, int] = {}
+            
+            for code, severity in issues:
+                # Count by issue code
+                if code not in issue_counts:
+                    issue_counts[code] = {
+                        "count": 0,
+                        "severity": severity,
+                        "severities": {}
+                    }
+                issue_counts[code]["count"] += 1
+                
+                # Track severity distribution for this code
+                if severity not in issue_counts[code]["severities"]:
+                    issue_counts[code]["severities"][severity] = 0
+                issue_counts[code]["severities"][severity] += 1
+                
+                # Count by severity
+                severity_counts[severity] = severity_counts.get(severity, 0) + 1
+            
+            # Sort by frequency
+            sorted_issues = sorted(
+                issue_counts.items(),
+                key=lambda x: x[1]["count"],
+                reverse=True
+            )[:limit]
+            
+            # Get descriptions for issue codes (from database if available)
+            common_issues = []
+            for code, data in sorted_issues:
+                # Try to get a sample message
+                sample_query = (
+                    select(ValidationIssueDB.message, ValidationIssueDB.field)
+                    .where(ValidationIssueDB.code == code)
+                    .limit(1)
+                )
+                sample = session.exec(sample_query).first()
+                
+                common_issues.append({
+                    "code": code,
+                    "count": data["count"],
+                    "severity": data["severity"],
+                    "severity_breakdown": data["severities"],
+                    "sample_message": sample[0] if sample else None,
+                    "field": sample[1] if sample else None,
+                })
+            
+            period_str = f"{year}/{month:02d}" if month else str(year) if year else "all time"
+            
+            return {
+                "period": period_str,
+                "total_issues": len(issues),
+                "common_issues": common_issues,
+                "by_severity": severity_counts,
+            }

@@ -456,12 +456,108 @@ class DatabaseStatsTool(BaseTool):
         return self._run()
 
 
+class AnalyzeValidationIssuesInput(BaseModel):
+    """Input schema for analyzing validation issues."""
+    
+    year: Optional[int] = Field(None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(None, description="Month to filter by (1-12), requires year")
+
+
+class ValidationAnalysisTool(BaseTool):
+    """Tool for analyzing and reporting on validation issues."""
+
+    name: str = "analyze_validation_issues"
+    description: str = """
+    Analyze validation issues to identify the most common problems in fiscal documents.
+    
+    Use this when user asks:
+    - "qual o problema de validação mais comum em 2024?"
+    - "quais são os problemas de validação mais frequentes?"
+    - "qual erro mais ocorre nos documentos?"
+    - "problemas de validação do mês de janeiro/fevereiro/etc"
+    
+    You can optionally filter by year and month.
+    
+    Returns: A detailed analysis of the most common validation issues, their frequency, 
+    and severity levels.
+    """
+    args_schema: type[BaseModel] = AnalyzeValidationIssuesInput
+
+    def _run(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Analyze validation issues."""
+        try:
+            # Create database connection
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            
+            analysis = db.get_validation_issue_analysis(year=year, month=month, limit=10)
+            
+            if analysis["total_issues"] == 0:
+                period_str = f"{year}/{month:02d}" if month else str(year) if year else "all time"
+                return f"""
+❌ **Nenhum problema de validação encontrado**
+
+Período analisado: {period_str}
+
+Isso significa que todos os documentos foram validados com sucesso! 🎉
+"""
+            
+            # Build result
+            period_str = analysis["period"]
+            result = f"""
+📊 **Análise de Problemas de Validação**
+
+**Período:** {period_str}
+**Total de Problemas:** {analysis['total_issues']}
+
+**Distribuição por Severidade:**
+"""
+            
+            for severity, count in sorted(analysis["by_severity"].items(), key=lambda x: x[1], reverse=True):
+                severity_emoji = "🔴" if severity == "error" else "🟡" if severity == "warning" else "ℹ️"
+                result += f"\n- {severity_emoji} {severity.upper()}: {count} problema(s)"
+            
+            result += "\n\n**Top Problemas Mais Frequentes:**\n"
+            
+            for idx, issue in enumerate(analysis["common_issues"], 1):
+                result += f"\n{idx}. **[{issue['code']}]** - {issue['count']} ocorrências"
+                result += f"\n   Severidade: {issue['severity']}"
+                
+                if issue['severity_breakdown']:
+                    severity_detail = ", ".join(
+                        f"{sev}: {cnt}" 
+                        for sev, cnt in sorted(
+                            issue['severity_breakdown'].items(),
+                            key=lambda x: x[1],
+                            reverse=True
+                        )
+                    )
+                    result += f" ({severity_detail})"
+                
+                if issue['field']:
+                    result += f"\n   Campo afetado: {issue['field']}"
+                
+                if issue['sample_message']:
+                    result += f"\n   Exemplo: {issue['sample_message'][:100]}..."
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing validation issues: {e}")
+            return f"❌ Erro ao analisar problemas de validação: {str(e)}"
+
+    async def _arun(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Async version."""
+        return self._run(year=year, month=month)
+
+
+
 # Tool instances
 parse_xml_tool = ParseXMLTool()
 validate_invoice_tool = ValidateInvoiceTool()
 fiscal_knowledge_tool = FiscalKnowledgeTool()
 database_search_tool = DatabaseSearchTool()
 database_stats_tool = DatabaseStatsTool()
+validation_analysis_tool = ValidationAnalysisTool()
 
 # Import business tools
 from src.agent.business_tools import ALL_BUSINESS_TOOLS
@@ -478,9 +574,11 @@ ALL_TOOLS = [
     fiscal_knowledge_tool,
     database_search_tool,
     database_stats_tool,
+    validation_analysis_tool,  # New: analyze common validation issues
     fiscal_report_export_tool,  # CSV/XLSX file export for download
     *ALL_BUSINESS_TOOLS,  # Includes 'generate_report' for interactive charts
     *ALL_ARCHIVER_TOOLS,
 ]
+
 
 
