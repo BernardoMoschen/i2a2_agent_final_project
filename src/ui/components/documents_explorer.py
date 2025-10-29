@@ -408,8 +408,16 @@ def render_documents_explorer(db: DatabaseManager) -> None:
                 # Write to Excel with formatting
                 import io as _io
                 buffer = _io.BytesIO()
-                # Prefer xlsxwriter for richer formatting; pandas will import it if installed
-                with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                
+                # Try xlsxwriter first (richer formatting), fallback to openpyxl
+                engine = "openpyxl"  # Default fallback
+                try:
+                    import xlsxwriter as _xlsxwriter
+                    engine = "xlsxwriter"
+                except ImportError:
+                    pass
+                
+                with pd.ExcelWriter(buffer, engine=engine) as writer:
                     inv_df.to_excel(writer, index=False, sheet_name="Invoices")
                     items_df.to_excel(writer, index=False, sheet_name="Items")
 
@@ -417,71 +425,73 @@ def render_documents_explorer(db: DatabaseManager) -> None:
                     ws_inv = writer.sheets["Invoices"]
                     ws_items = writer.sheets["Items"]
 
-                    # Formats
-                    header_fmt = wb.add_format({"bold": True, "bg_color": "#F2F2F2", "bottom": 1})
-                    money_fmt = wb.add_format({"num_format": "R$ #,##0.00"})
-                    num2_fmt = wb.add_format({"num_format": "0.00"})
+                    # Only apply xlsxwriter-specific formatting if using xlsxwriter
+                    if engine == "xlsxwriter":
+                        # Formats (xlsxwriter only)
+                        header_fmt = wb.add_format({"bold": True, "bg_color": "#F2F2F2", "bottom": 1})
+                        money_fmt = wb.add_format({"num_format": "R$ #,##0.00"})
+                        num2_fmt = wb.add_format({"num_format": "0.00"})
 
-                    # Apply header format
-                    for col, _name in enumerate(inv_df.columns):
-                        ws_inv.write(0, col, inv_df.columns[col], header_fmt)
-                    for col, _name in enumerate(items_df.columns):
-                        ws_items.write(0, col, items_df.columns[col], header_fmt)
+                        # Apply header format
+                        for col, _name in enumerate(inv_df.columns):
+                            ws_inv.write(0, col, inv_df.columns[col], header_fmt)
+                        for col, _name in enumerate(items_df.columns):
+                            ws_items.write(0, col, items_df.columns[col], header_fmt)
 
-                    # Column widths & numeric formats for Invoices
-                    inv_widths = {
-                        "Date": 20,
-                        "Type": 8,
-                        "Operation": 12,
-                        "Number": 10,
-                        "Issuer": 28,
-                        "CNPJ": 18,
-                        "Recipient": 28,
-                        "Recipient Doc": 18,
-                        "Modal": 8,
-                        "Cost Center": 12,
-                        "Confidence": 12,
-                        "Items": 8,
-                        "Total": 14,
-                        "Key": 40,
-                    }
-                    for i, col in enumerate(inv_df.columns):
-                        ws_inv.set_column(i, i, inv_widths.get(col, 12))
-                        if col == "Total":
-                            ws_inv.set_column(i, i, inv_widths.get(col, 12), money_fmt)
-                        if col == "Confidence":
-                            ws_inv.set_column(i, i, inv_widths.get(col, 12), num2_fmt)
+                        # Column widths & numeric formats for Invoices
+                        inv_widths = {
+                            "Date": 20,
+                            "Type": 8,
+                            "Operation": 12,
+                            "Number": 10,
+                            "Issuer": 28,
+                            "CNPJ": 18,
+                            "Recipient": 28,
+                            "Recipient Doc": 18,
+                            "Modal": 8,
+                            "Cost Center": 12,
+                            "Confidence": 12,
+                            "Items": 8,
+                            "Total": 14,
+                            "Key": 40,
+                        }
+                        for i, col in enumerate(inv_df.columns):
+                            ws_inv.set_column(i, i, inv_widths.get(col, 12))
+                            if col == "Total":
+                                ws_inv.set_column(i, i, inv_widths.get(col, 12), money_fmt)
+                            if col == "Confidence":
+                                ws_inv.set_column(i, i, inv_widths.get(col, 12), num2_fmt)
 
-                    # Column widths & numeric formats for Items
-                    items_widths = {
-                        "Invoice Key": 40,
-                        "Item": 6,
-                        "Code": 14,
-                        "Description": 40,
-                        "NCM": 12,
-                        "CFOP": 10,
-                        "Unit": 8,
-                        "Quantity": 10,
-                        "Unit Price": 14,
-                        "Total Price": 14,
-                        "ICMS": 12,
-                        "IPI": 12,
-                        "PIS": 12,
-                        "COFINS": 12,
-                        "ISSQN": 12,
-                    }
-                    for i, col in enumerate(items_df.columns):
-                        ws_items.set_column(i, i, items_widths.get(col, 12))
-                        if col in ("Unit Price", "Total Price", "ICMS", "IPI", "PIS", "COFINS", "ISSQN"):
-                            ws_items.set_column(i, i, items_widths.get(col, 12), money_fmt)
-                        if col == "Quantity":
-                            ws_items.set_column(i, i, items_widths.get(col, 12), num2_fmt)
+                        # Column widths & numeric formats for Items
+                        items_widths = {
+                            "Invoice Key": 40,
+                            "Item": 6,
+                            "Code": 14,
+                            "Description": 40,
+                            "NCM": 12,
+                            "CFOP": 10,
+                            "Unit": 8,
+                            "Quantity": 10,
+                            "Unit Price": 14,
+                            "Total Price": 14,
+                            "ICMS": 12,
+                            "IPI": 12,
+                            "PIS": 12,
+                            "COFINS": 12,
+                            "ISSQN": 12,
+                        }
+                        for i, col in enumerate(items_df.columns):
+                            ws_items.set_column(i, i, items_widths.get(col, 12))
+                            if col in ("Unit Price", "Total Price", "ICMS", "IPI", "PIS", "COFINS", "ISSQN"):
+                                ws_items.set_column(i, i, items_widths.get(col, 12), money_fmt)
+                            if col == "Quantity":
+                                ws_items.set_column(i, i, items_widths.get(col, 12), num2_fmt)
 
-                    # Freeze headers & add filters
-                    ws_inv.freeze_panes(1, 0)
-                    ws_items.freeze_panes(1, 0)
-                    ws_inv.autofilter(0, 0, max(1, len(inv_df)), max(0, len(inv_df.columns) - 1))
-                    ws_items.autofilter(0, 0, max(1, len(items_df)), max(0, len(items_df.columns) - 1))
+                        # Freeze headers & add filters
+                        ws_inv.freeze_panes(1, 0)
+                        ws_items.freeze_panes(1, 0)
+                        ws_inv.autofilter(0, 0, max(1, len(inv_df)), max(0, len(inv_df.columns) - 1))
+                        ws_items.autofilter(0, 0, max(1, len(items_df)), max(0, len(items_df.columns) - 1))
 
                 st.download_button(
                     "Download Excel (Invoices + Items)",
