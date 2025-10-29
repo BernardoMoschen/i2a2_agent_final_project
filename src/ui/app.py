@@ -113,7 +113,7 @@ def main() -> None:
 
     # Sidebar for configuration
     with st.sidebar:
-        st.header("⚙️ Settings")
+        st.header("⚙️ Configuration")
 
         # API Key input
         api_key = st.text_input(
@@ -133,15 +133,19 @@ def main() -> None:
         st.divider()
 
         # System status
-        st.subheader("🔌 Status")
+        st.subheader("🔌 Connection")
         if api_key and st.session_state.get("agent"):
-            st.success("✅ Agent connected to Gemini")
+            st.success("✅ Connected to Gemini")
         elif api_key:
             st.warning("⏳ Initializing agent...")
         else:
-            st.warning("⚠️ No API Key (limited mode)")
+            st.warning("⚠️ No API Key provided")
 
         st.caption(f"💾 Database: {db_path}")
+
+    # Initialize tab selection in session state
+    if "selected_tab" not in st.session_state:
+        st.session_state.selected_tab = 0  # Default to Home tab
 
     # Native Streamlit tabs - no CSS complexity
     tab_home, tab_documents, tab_reports, tab_statistics = st.tabs(
@@ -173,8 +177,7 @@ def main() -> None:
             # Check if agent is available
             if not st.session_state.get("agent"):
                 st.warning(
-                    "⚠️ Por favor, configure sua chave API do Gemini na barra lateral "
-                    "para usar o chat."
+                    "⚠️ Please configure your Gemini API key in the sidebar to use the chat."
                 )
             else:
                 # Add user message
@@ -184,34 +187,15 @@ def main() -> None:
 
                 # Get agent response
                 with st.chat_message("assistant"):
-                    with st.spinner("🤔 Pensando..."):
+                    with st.spinner("🤔 Thinking..."):
                         try:
                             response = st.session_state.agent.chat(prompt)
                             st.markdown(response)
                             st.session_state.messages.append({"role": "assistant", "content": response})
                         except (ValueError, KeyError, RuntimeError, TimeoutError) as e:
-                            error_msg = f"❌ Erro ao processar mensagem: {str(e)}"
+                            error_msg = f"❌ Error processing message: {str(e)}"
                             st.error(error_msg)
                             logger.error(f"Chat error: {e}", exc_info=True)
-
-        # Quick Actions below chat
-        st.markdown("---")
-        st.markdown("#### Quick Actions")
-        st.caption("Navigate to key features")
-
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            if st.button("⬆️ Upload XMLs", use_container_width=True, type="secondary"):
-                st.switch_page("page_documents")
-        with c2:
-            if st.button("🔍 Search Documents", use_container_width=True, type="secondary"):
-                st.switch_page("page_documents")
-        with c3:
-            if st.button("📊 View Statistics", use_container_width=True, type="secondary"):
-                st.switch_page("page_statistics")
-        with c4:
-            if st.button("📈 Generate Report", use_container_width=True, type="secondary"):
-                st.switch_page("page_reports")
 
     # ============= DOCUMENTS TAB =============
     with tab_documents:
