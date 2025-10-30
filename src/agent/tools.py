@@ -268,6 +268,7 @@ class SearchInvoicesInput(BaseModel):
     operation_type: Optional[str] = Field(None, description="Filter by operation type: purchase (compra), sale (venda), transfer (transferência), or return (devolução)")
     issuer_cnpj: Optional[str] = Field(None, description="Filter by issuer CNPJ (14 digits)")
     days_back: Optional[int] = Field(9999, description="Search last N days. Default is 9999 to search ALL documents ever processed. ALWAYS use 9999 when user asks about counts, years, or 'all' documents.")
+    specific_date: Optional[str] = Field(None, description="Search for documents on a specific date (format: DD/MM/YYYY or YYYY-MM-DD). When used, days_back is ignored.")
 
 
 class DatabaseSearchTool(BaseTool):
@@ -313,13 +314,39 @@ class DatabaseSearchTool(BaseTool):
         operation_type: Optional[str] = None,
         issuer_cnpj: Optional[str] = None,
         days_back: int = 9999,
+        specific_date: Optional[str] = None,
     ) -> str:
         """Search invoices in database."""
         try:
-            logger.info(f"DatabaseSearchTool called with: document_type={document_type}, operation_type={operation_type}, issuer_cnpj={issuer_cnpj}, days_back={days_back}")
+            logger.info(f"DatabaseSearchTool called with: document_type={document_type}, operation_type={operation_type}, issuer_cnpj={issuer_cnpj}, days_back={days_back}, specific_date={specific_date}")
             
             # Create database connection (no state stored)
             db = DatabaseManager("sqlite:///fiscal_documents.db")
+            
+            # Handle specific date filter
+            start_date = None
+            end_date = None
+            date_label = ""
+            
+            if specific_date:
+                from datetime import datetime as dt_module
+                # Parse the date in different formats
+                parsed_date = None
+                for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"]:
+                    try:
+                        parsed_date = dt_module.strptime(specific_date, fmt)
+                        break
+                    except ValueError:
+                        continue
+                
+                if parsed_date is None:
+                    return f"❌ Formato de data inválido: '{specific_date}'. Use DD/MM/YYYY ou YYYY-MM-DD"
+                
+                # Set start and end of the specific day
+                start_date = parsed_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = parsed_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+                date_label = parsed_date.strftime("%d/%m/%Y")
+                days_back = None  # Ignore days_back when specific_date is provided
             
             # Search database with all filters
             invoices = db.search_invoices(
@@ -327,6 +354,8 @@ class DatabaseSearchTool(BaseTool):
                 operation_type=operation_type,
                 issuer_cnpj=issuer_cnpj,
                 days_back=days_back,
+                start_date=start_date,
+                end_date=end_date,
                 limit=100,
             )
             
@@ -341,7 +370,10 @@ class DatabaseSearchTool(BaseTool):
                     filter_desc.append(f"Operação: {op_label}")
                 if issuer_cnpj:
                     filter_desc.append(f"Emitente: {issuer_cnpj}")
-                filter_desc.append(f"Período: Últimos {days_back} dias")
+                if specific_date:
+                    filter_desc.append(f"Data: {date_label}")
+                else:
+                    filter_desc.append(f"Período: Últimos {days_back} dias")
                 
                 return f"""
 🔍 Nenhum documento encontrado com os filtros:
