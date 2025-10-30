@@ -115,16 +115,23 @@ def display_agent_response(response_text: str) -> None:
     # Parse response into components
     parsed = AgentResponseParser.parse_response(response_text)
     
+    # Debug: log what was found
+    has_chart = parsed["chart"] is not None
+    has_file = parsed["file"] is not None
+    logger.info(f"Parsed response - Chart: {has_chart}, File: {has_file}, Text length: {len(parsed['text'])}")
+    
     # Render chart if present
     if parsed["chart"]:
         try:
+            logger.info(f"Rendering chart with keys: {list(parsed['chart'].keys())}")
             st.plotly_chart(
                 parsed["chart"],
                 use_container_width=True,
                 key=f"chart_{hash(str(parsed['chart'])) % 10000}"
             )
         except Exception as e:
-            logger.error(f"Error rendering chart: {e}")
+            logger.error(f"Error rendering chart: {e}", exc_info=True)
+            st.error(f"Error displaying chart: {e}")
     
     # Render text if present
     if parsed["text"]:
