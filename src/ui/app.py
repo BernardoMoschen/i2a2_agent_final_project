@@ -1,6 +1,8 @@
 """Streamlit UI for Fiscal Document Agent."""
 
+import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+import plotly.graph_objects as go
 import streamlit as st
 
 from src.agent.agent_core import create_agent
@@ -102,6 +105,92 @@ def get_cached_db(db_path: str) -> database_db.DatabaseManager:
     return st.session_state[db_key]
 
 
+def extract_and_render_plotly(response_text: str) -> str:
+    """
+    Extract Plotly JSON from response and render it, returning remaining text.
+    
+    Args:
+        response_text: The agent's response text that may contain Plotly JSON
+        
+    Returns:
+        The response text with Plotly JSON removed (rendered separately)
+    """
+    try:
+        remaining_text = response_text
+        
+        # Pattern 1: JSON in code fence with markdown backticks
+        code_fence_pattern = r'```json\n(.*?)\n```'
+        match = re.search(code_fence_pattern, response_text, re.DOTALL)
+        
+        if match:
+            json_str = match.group(1)
+            remaining_text = re.sub(code_fence_pattern, '', response_text, count=1, flags=re.DOTALL)
+        else:
+            # Pattern 2: Look for raw JSON object with Plotly structure
+            # Search for the pattern starting with { and containing "data" and "layout"
+            # This is a greedy match from first { to matching }
+            
+            # Find all potential JSON start positions
+            json_start = response_text.find('{"data"')
+            if json_start == -1:
+                json_start = response_text.find('{"marker"')
+            
+            if json_start >= 0:
+                # Try to find the closing brace by counting braces
+                brace_count = 0
+                json_end = json_start
+                in_string = False
+                escape_next = False
+                
+                for i in range(json_start, len(response_text)):
+                    char = response_text[i]
+                    
+                    if escape_next:
+                        escape_next = False
+                        continue
+                    
+                    if char == '\\':
+                        escape_next = True
+                        continue
+                    
+                    if char == '"':
+                        in_string = not in_string
+                        continue
+                    
+                    if not in_string:
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                json_end = i + 1
+                                break
+                
+                if brace_count == 0 and json_end > json_start:
+                    json_str = response_text[json_start:json_end]
+                    remaining_text = response_text[:json_start] + response_text[json_end:]
+                else:
+                    return response_text
+            else:
+                return response_text
+        
+        # Try to parse as Plotly
+        fig_dict = json.loads(json_str)
+        
+        # Verify it's a Plotly figure (has 'data' and 'layout')
+        if 'data' in fig_dict and 'layout' in fig_dict:
+            # Render the chart with proper width
+            st.plotly_chart(fig_dict, use_container_width=True, key=f"chart_{hash(json_str) % 10000}")
+            return remaining_text.strip()
+        else:
+            return response_text
+            
+    except (json.JSONDecodeError, AttributeError, KeyError, Exception) as e:
+        logger.debug(f"Could not extract Plotly chart: {e}")
+        # Not valid Plotly JSON, return original text
+        return response_text
+
+
 def main() -> None:
     """Main Streamlit application."""
     st.title("📄 Fiscal Document Agent")
@@ -156,7 +245,29 @@ def main() -> None:
     with tab_home:
         # Chat interface as primary interaction
         st.header("💬 Chat with Your Documents")
-        st.caption("Ask in natural language. Portuguese or English. Minimal answers, clear actions.")
+        st.caption("Ask ANY question in natural language. Portuguese or English.")
+        
+        # Info box about capabilities
+        with st.expander("💡 What can you ask?", expanded=False):
+            st.markdown("""
+            ### 📋 Questions about YOUR documents:
+            - "Quantas notas de compra temos?"
+            - "Mostre vendas de 2024"
+            - "Qual fornecedor tem mais compras?"
+            
+            ### 📚 General fiscal/accounting knowledge:
+            - "O que é ICMS?"
+            - "Como calcular IPI?"
+            - "Qual a diferença entre NFe e NFCe?"
+            - "O que é Simples Nacional?"
+            
+            ### 🌍 General knowledge:
+            - "Quem foi Albert Einstein?"
+            - "Como funciona a fotossíntese?"
+            - "O que é um arquivo XML?"
+            
+            **The agent can answer ANYTHING!** 🚀
+            """)
 
         # Initialize chat messages
         if "messages" not in st.session_state:
@@ -170,10 +281,12 @@ def main() -> None:
         # Display chat history
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+                remaining_text = extract_and_render_plotly(message["content"])
+                if remaining_text:
+                    st.markdown(remaining_text)
 
         # Chat input
-        if prompt := st.chat_input("Ask about your fiscal documents..."):
+        if prompt := st.chat_input("Ask about your fiscal documents, taxes, or anything else..."):
             # Check if agent is available
             if not st.session_state.get("agent"):
                 st.warning(
@@ -190,7 +303,9 @@ def main() -> None:
                     with st.spinner("🤔 Thinking..."):
                         try:
                             response = st.session_state.agent.chat(prompt)
-                            st.markdown(response)
+                            remaining_text = extract_and_render_plotly(response)
+                            if remaining_text:
+                                st.markdown(remaining_text)
                             st.session_state.messages.append({"role": "assistant", "content": response})
                         except (ValueError, KeyError, RuntimeError, TimeoutError) as e:
                             error_msg = f"❌ Error processing message: {str(e)}"
@@ -253,7 +368,7 @@ def main() -> None:
                     "Type": list(db_stats["by_type"].keys()),
                     "Count": list(db_stats["by_type"].values()),
                 }
-                st.bar_chart(type_df, x="Type", y="Count", use_container_width=True)
+                st.bar_chart(type_df, x="Type", y="Count", width='stretch')
             else:
                 st.info("No documents in database yet.")
 

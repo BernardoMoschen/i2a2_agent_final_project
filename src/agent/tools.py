@@ -215,45 +215,68 @@ class AnswerQuestionInput(BaseModel):
 
 
 class FiscalKnowledgeTool(BaseTool):
-    """Tool for answering general questions about Brazilian fiscal documents."""
+    """Tool for answering general questions about Brazilian fiscal documents and accounting."""
 
     name: str = "fiscal_knowledge"
     description: str = """
-    Answer general questions about Brazilian fiscal documents, tax rules, and processes.
-    Use this for questions about:
-    - What is NFe, NFCe, CTe, MDFe
-    - Tax types (ICMS, IPI, PIS, COFINS, ISS)
-    - CFOP codes and their meanings
-    - NCM classification
-    - Fiscal document requirements
-    Do NOT use this for parsing or validating specific documents.
+    Answer ANY general question about:
+    - Brazilian fiscal documents (NFe, NFCe, CTe, MDFe)
+    - Tax rules and types (ICMS, IPI, PIS, COFINS, ISS)
+    - CFOP codes, NCM classification, CST/CSOSN codes
+    - Brazilian accounting and fiscal legislation
+    - General knowledge questions (history, science, current events, etc.)
+    - Explanations, definitions, calculations, and advice
+    
+    Use this tool when the user asks something that does NOT require:
+    - Searching specific invoices in the database
+    - Parsing or validating XML documents
+    - Generating reports or visualizations
+    
+    This tool can handle BOTH fiscal-specific and general knowledge questions.
     """
     args_schema: type[BaseModel] = AnswerQuestionInput
 
     def _run(self, question: str) -> str:
-        """Provide general fiscal knowledge."""
-        # This would ideally use a knowledge base or RAG
-        # For now, return a helpful message
-        return """
-Sou um agente especializado em documentos fiscais brasileiros. Posso ajudar com:
+        """
+        Provide comprehensive answers using built-in knowledge.
+        
+        This is a placeholder that returns guidance. In production, this would:
+        1. Use the agent's LLM directly for general questions
+        2. Query a fiscal knowledge base for specific fiscal topics
+        3. Provide detailed, accurate answers
+        
+        Args:
+            question: The user's question
+            
+        Returns:
+            A comprehensive answer or guidance message
+        """
+        # Return a signal that tells the agent to use its own knowledge
+        return f"""
+🤔 **Analyzing question:** "{question}"
 
-📄 **Tipos de Documentos:**
-- NFe: Nota Fiscal Eletrônica (vendas em geral)
-- NFCe: Nota Fiscal de Consumidor Eletrônica (varejo)
-- CTe: Conhecimento de Transporte Eletrônico
-- MDFe: Manifesto Eletrônico de Documentos Fiscais
+💡 **AGENT INSTRUCTION**: This question requires general knowledge or fiscal expertise.
+Please provide a comprehensive answer using your training data and expertise.
 
-💰 **Impostos:**
-- ICMS: Imposto sobre Circulação de Mercadorias e Serviços
-- IPI: Imposto sobre Produtos Industrializados
-- PIS/COFINS: Contribuições sociais
-- ISS: Imposto sobre Serviços
+If this is about:
+- **Fiscal documents/taxes**: Explain the concept, rules, and practical applications
+- **General knowledge**: Answer directly based on your training
+- **Calculations**: Show step-by-step working
+- **Advice**: Provide helpful, accurate guidance with caveats where needed
 
-🔢 **Códigos:**
-- CFOP: Código Fiscal de Operações (ex: 5102 = venda dentro do estado)
-- NCM: Nomenclatura Comum do Mercosul (classificação de produtos)
+� **Quick Fiscal Reference:**
+- NFe: Nota Fiscal Eletrônica (general sales)
+- NFCe: Nota Fiscal de Consumidor Eletrônica (retail)
+- CTe: Conhecimento de Transporte Eletrônico (transport)
+- MDFe: Manifesto Eletrônico de Documentos Fiscais (cargo manifest)
+- ICMS: State tax on goods/services circulation
+- IPI: Federal tax on industrialized products
+- PIS/COFINS: Federal social contributions
+- ISS: Municipal tax on services
+- CFOP: Fiscal operation codes (e.g., 5102 = in-state sale)
+- NCM: Mercosul common nomenclature for product classification
 
-Para perguntas específicas, forneça mais detalhes ou um documento XML para análise!
+Now provide your detailed answer to the user's question.
 """
 
     async def _arun(self, question: str) -> str:
@@ -315,10 +338,33 @@ class DatabaseSearchTool(BaseTool):
         issuer_cnpj: Optional[str] = None,
         days_back: int = 9999,
         specific_date: Optional[str] = None,
+        **kwargs,
     ) -> str:
         """Search invoices in database."""
+        import json
+        
+        # Handle case where LangChain passes all params as a dict (or JSON string) to first argument
+        if isinstance(document_type, dict):
+            params = document_type
+            document_type = params.get('document_type')
+            operation_type = params.get('operation_type')
+            issuer_cnpj = params.get('issuer_cnpj')
+            days_back = params.get('days_back', 9999)
+            specific_date = params.get('specific_date')
+        elif isinstance(document_type, str) and document_type.startswith('{'):
+            # Handle JSON string (LangChain sometimes sends JSON strings)
+            try:
+                params = json.loads(document_type)
+                document_type = params.get('document_type')
+                operation_type = params.get('operation_type')
+                issuer_cnpj = params.get('issuer_cnpj')
+                days_back = params.get('days_back', 9999)
+                specific_date = params.get('specific_date')
+            except json.JSONDecodeError:
+                pass  # Not JSON, treat as normal string
+        
         try:
-            logger.info(f"DatabaseSearchTool called with: document_type={document_type}, operation_type={operation_type}, issuer_cnpj={issuer_cnpj}, days_back={days_back}, specific_date={specific_date}")
+            logger.info(f"DatabaseSearchTool FINAL params: document_type={document_type}, operation_type={operation_type}, issuer_cnpj={issuer_cnpj}, days_back={days_back}, specific_date={specific_date}")
             
             # Create database connection (no state stored)
             db = DatabaseManager("sqlite:///fiscal_documents.db")

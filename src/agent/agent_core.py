@@ -87,15 +87,16 @@ SEUS NOMES DE FERRAMENTAS: {{tool_names}}
             prompt=self.prompt,
         )
 
-        # Create executor
+        # Create executor with better configuration for general questions
         self.executor = AgentExecutor(
             agent=self.agent,
             tools=ALL_TOOLS,
             memory=self.memory,
             verbose=True,
             handle_parsing_errors=True,
-            max_iterations=5,
+            max_iterations=10,  # Increased to allow more tool usage
             early_stopping_method="generate",
+            return_intermediate_steps=False,  # Cleaner output
         )
 
         logger.info(f"Agent initialized with model {model_name}")

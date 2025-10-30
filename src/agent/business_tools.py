@@ -31,12 +31,16 @@ class GenerateReportInput(BaseModel):
         description=(
             "Type of report to generate: "
             "'sales_by_month' | 'purchases_by_month' | 'taxes_breakdown' | "
-            "'supplier_ranking' | 'invoices_timeline'"
+            "'supplier_ranking' | 'invoices_timeline' | 'issues_by_severity'"
         ),
     )
     days_back: int = Field(
         default=365,
         description="Number of days to include in the report (default: 365 days)",
+    )
+    year: int = Field(
+        default=None,
+        description="Optional: Year to filter by (e.g., 2024). If provided, takes precedence over days_back",
     )
 
 
@@ -52,6 +56,7 @@ class ReportGeneratorTool(BaseTool):
     - taxes_breakdown: Tax breakdown by type (pie chart)
     - supplier_ranking: Top 10 suppliers by total value (horizontal bar)
     - invoices_timeline: Daily invoice counts (line chart)
+    - issues_by_severity: Validation issues by severity level (bar chart)
     """
 
     name: str = "generate_report"
@@ -63,6 +68,7 @@ class ReportGeneratorTool(BaseTool):
     - "Mostrar breakdown de impostos"
     - "Ranking de fornecedores"
     - "Evolução temporal de notas"
+    - "Gráfico de erros de validação"
     
     Available report types:
     - sales_by_month: Monthly sales totals
@@ -70,14 +76,32 @@ class ReportGeneratorTool(BaseTool):
     - taxes_breakdown: Tax breakdown (ICMS, IPI, PIS, COFINS)
     - supplier_ranking: Top 10 suppliers by value
     - invoices_timeline: Daily invoice counts
+    - issues_by_severity: Distribution of validation issues by severity
     
     Returns: Description of the chart + Plotly JSON for embedding
     """
     args_schema: type[BaseModel] = GenerateReportInput
 
-    def _run(self, report_type: str, days_back: int = 365) -> str:
+    def _run(self, report_type: str, days_back: int = 365, year: int = None) -> str:
         """Generate report and return Plotly chart JSON."""
         try:
+            import json
+            
+            # Handle LangChain JSON string input (all params in first argument)
+            if isinstance(report_type, dict):
+                params = report_type
+                report_type = params.get('report_type', 'unknown')
+                days_back = params.get('days_back', 365)
+                year = params.get('year', None)
+            elif isinstance(report_type, str) and report_type.startswith('{'):
+                try:
+                    params = json.loads(report_type)
+                    report_type = params.get('report_type', 'unknown')
+                    days_back = params.get('days_back', 365)
+                    year = params.get('year', None)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            
             db = DatabaseManager("sqlite:///fiscal_documents.db")
             
             # Get data based on report type
@@ -96,8 +120,11 @@ class ReportGeneratorTool(BaseTool):
             elif report_type == "invoices_timeline":
                 return self._generate_invoices_timeline(db, days_back)
             
+            elif report_type == "issues_by_severity":
+                return self._generate_issues_by_severity(db, year)
+            
             else:
-                return f"❌ Tipo de relatório desconhecido: {report_type}"
+                return f"❌ Tipo de relatório desconhecido: {report_type}. Tipos suportados: sales_by_month, purchases_by_month, taxes_breakdown, supplier_ranking, invoices_timeline, issues_by_severity"
         
         except Exception as e:
             logger.error(f"Error generating report: {e}", exc_info=True)
@@ -398,9 +425,115 @@ class ReportGeneratorTool(BaseTool):
 {chart_json}
 """
 
-    async def _arun(self, report_type: str, days_back: int = 365) -> str:
+    def _generate_issues_by_severity(self, db: DatabaseManager, year: int = None) -> str:
+        """Generate validation issues chart by severity."""
+        try:
+            # Get all invoices, then filter their issues
+            invoices = db.search_invoices(
+                days_back=9999,  # Get all invoices
+                limit=10000
+            )
+            
+            # Collect all issues
+            all_issues = []
+            for invoice in invoices:
+                # Filter by year if specified
+                if year and invoice.issue_date.year != year:
+                    continue
+                
+                try:
+                    # Get issues for this invoice
+                    issues = db.get_validation_issues(invoice.id)
+                    all_issues.extend(issues)
+                except Exception as e:
+                    logger.debug(f"No issues for invoice {invoice.id}: {e}")
+            
+            if not all_issues:
+                return f"📊 Nenhum problema de validação encontrado{f' em {year}' if year else ''}."
+            
+            # Count by severity
+            severity_counts = {}
+            issue_types = {}
+            
+            for issue in all_issues:
+                severity = issue.severity if hasattr(issue, 'severity') else 'unknown'
+                issue_code = issue.code if hasattr(issue, 'code') else 'unknown'
+                
+                # Count by severity
+                severity_counts[severity] = severity_counts.get(severity, 0) + 1
+                
+                # Count by type
+                issue_types[issue_code] = issue_types.get(issue_code, 0) + 1
+            
+            if not severity_counts:
+                return f"📊 Nenhum problema de validação encontrado{f' em {year}' if year else ''}."
+            
+            # Create severity chart
+            severities = sorted(severity_counts.keys())
+            counts = [severity_counts[s] for s in severities]
+            
+            # Color map for severities
+            colors = {
+                'error': 'rgb(239, 65, 53)',      # Red
+                'warning': 'rgb(255, 193, 7)',   # Yellow/Orange
+                'info': 'rgb(33, 150, 243)',     # Blue
+            }
+            bar_colors = [colors.get(s, 'rgb(200, 200, 200)') for s in severities]
+            
+            # Create bar chart
+            fig = go.Figure(data=[
+                go.Bar(
+                    x=severities,
+                    y=counts,
+                    marker_color=bar_colors,
+                    text=counts,
+                    textposition='auto',
+                )
+            ])
+            
+            fig.update_layout(
+                title=f"📊 Problemas de Validação por Severidade{f' - {year}' if year else ''}",
+                xaxis_title="Nível de Severidade",
+                yaxis_title="Quantidade de Problemas",
+                template="plotly_white",
+                height=400,
+                showlegend=False,
+            )
+            
+            chart_json = fig.to_json()
+            
+            # Create summary text
+            summary = f"""
+📊 **Análise de Problemas de Validação**
+
+📅 Período: {year if year else 'Todos os períodos'}
+📋 Total de problemas: {len(issues)}
+
+**Distribuição por Severidade:**
+"""
+            
+            for severity in sorted(severity_counts.keys()):
+                emoji = '🔴' if severity == 'error' else '🟡' if severity == 'warning' else '🔵'
+                summary += f"\n- {emoji} {severity.upper()}: {severity_counts[severity]} problema(s)"
+            
+            summary += f"\n\n**Problemas Mais Frequentes:**\n"
+            
+            # Top issues
+            sorted_issues = sorted(issue_types.items(), key=lambda x: x[1], reverse=True)
+            for i, (code, count) in enumerate(sorted_issues[:5], 1):
+                summary += f"\n{i}. **[{code}]** - {count} ocorrência(s)"
+            
+            summary += f"\n\n🎨 Gráfico gerado (ver abaixo)\n\n{chart_json}"
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Error generating issues chart: {e}", exc_info=True)
+            return f"❌ Erro ao gerar gráfico de problemas: {str(e)}"
+
+    async def _arun(self, report_type: str, days_back: int = 365, year: int = None) -> str:
         """Async version."""
-        return self._run(report_type, days_back)
+        return self._run(report_type, days_back, year)
 
 
 # ============================================================================
