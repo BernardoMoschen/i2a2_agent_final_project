@@ -105,6 +105,40 @@ def get_cached_db(db_path: str) -> database_db.DatabaseManager:
     return st.session_state[db_key]
 
 
+def extract_file_downloads(response_text: str) -> tuple[str, list]:
+    """
+    Extract file paths from response and return remaining text + file list.
+    
+    Args:
+        response_text: The agent's response text that may contain file paths
+        
+    Returns:
+        Tuple of (remaining_text, list_of_file_paths)
+    """
+    file_paths = []
+    remaining_text = response_text
+    
+    # Look for file paths in reports directory
+    reports_dir = Path("./reports")
+    
+    # Pattern: mentions of files like "issues_by_type_20251030_101329.xlsx"
+    file_pattern = r'([a-zA-Z0-9_]+_\d{8}_\d{6}\.(xlsx|csv|png))'
+    matches = re.finditer(file_pattern, response_text)
+    
+    for match in matches:
+        filename = match.group(1)
+        file_path = reports_dir / filename
+        
+        if file_path.exists():
+            file_paths.append({
+                'name': filename,
+                'path': str(file_path),
+                'ext': filename.split('.')[-1]
+            })
+    
+    return remaining_text, file_paths
+
+
 def extract_and_render_plotly(response_text: str) -> str:
     """
     Extract Plotly JSON from response and render it, returning remaining text.
@@ -281,9 +315,33 @@ def main() -> None:
         # Display chat history
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
+                # Extract and render Plotly charts
                 remaining_text = extract_and_render_plotly(message["content"])
+                
+                # Extract and render file downloads
+                remaining_text, files = extract_file_downloads(remaining_text)
+                
+                # Display remaining text
                 if remaining_text:
                     st.markdown(remaining_text)
+                
+                # Display download buttons for files
+                if files:
+                    st.divider()
+                    for file_info in files:
+                        file_ext = file_info['ext'].upper()
+                        emoji = "📊" if file_ext == "XLSX" else "📄" if file_ext == "CSV" else "🖼️"
+                        
+                        with open(file_info['path'], "rb") as f:
+                            st.download_button(
+                                label=f"{emoji} Download {file_info['name']}",
+                                data=f.read(),
+                                file_name=file_info['name'],
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
+                                     if file_ext == "XLSX" else "text/csv" 
+                                     if file_ext == "CSV" else "image/png",
+                                key=f"download_{file_info['name']}"
+                            )
 
         # Chat input
         if prompt := st.chat_input("Ask about your fiscal documents, taxes, or anything else..."):
@@ -303,9 +361,35 @@ def main() -> None:
                     with st.spinner("🤔 Thinking..."):
                         try:
                             response = st.session_state.agent.chat(prompt)
+                            
+                            # Extract and render Plotly charts
                             remaining_text = extract_and_render_plotly(response)
+                            
+                            # Extract and render file downloads
+                            remaining_text, files = extract_file_downloads(remaining_text)
+                            
+                            # Display remaining text
                             if remaining_text:
                                 st.markdown(remaining_text)
+                            
+                            # Display download buttons for files
+                            if files:
+                                st.divider()
+                                for file_info in files:
+                                    file_ext = file_info['ext'].upper()
+                                    emoji = "📊" if file_ext == "XLSX" else "📄" if file_ext == "CSV" else "🖼️"
+                                    
+                                    with open(file_info['path'], "rb") as f:
+                                        st.download_button(
+                                            label=f"{emoji} Download {file_info['name']}",
+                                            data=f.read(),
+                                            file_name=file_info['name'],
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
+                                                 if file_ext == "XLSX" else "text/csv" 
+                                                 if file_ext == "CSV" else "image/png",
+                                            key=f"download_{file_info['name']}"
+                                        )
+                            
                             st.session_state.messages.append({"role": "assistant", "content": response})
                         except (ValueError, KeyError, RuntimeError, TimeoutError) as e:
                             error_msg = f"❌ Error processing message: {str(e)}"
