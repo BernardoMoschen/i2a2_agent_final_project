@@ -117,6 +117,8 @@ class FiscalReportExportTool(BaseTool):
     ) -> str:
         """Generate report based on natural language query."""
         try:
+            import json
+            
             # Parse query to extract report type and filters
             report_type, filters = self._parse_query(query)
             
@@ -139,14 +141,21 @@ class FiscalReportExportTool(BaseTool):
                 include_chart=include_chart,
             )
             
+            # Get the DataFrame for chart generation
+            df = generator.get_report_data(report_type=report_type, filters=filters)
+            
+            # Generate Plotly chart (Cloud-compatible)
+            chart_dict = None
+            if include_chart and df is not None and not df.empty:
+                chart_dict = generator._generate_plotly_chart(df, report_type)
+            
             # Format response
             response = f"""
 ✅ **Report Generated Successfully!**
 
 📊 **Report Type:** {report_type.replace('_', ' ').title()}
 📁 **File:** `{result['file_path']}`
-📈 **Chart:** `{result['chart_path'] or 'Not generated'}`
-📄 **Rows:** {result['row_count']}
+ **Rows:** {result['row_count']}
 ⏰ **Generated:** {result['generated_at']}
 
 **Filters Applied:**
@@ -169,6 +178,10 @@ class FiscalReportExportTool(BaseTool):
                 response += f"\n🎯 Cache Hits: {result['total_cache_hits']}"
             
             response += f"\n\n💡 **Tip:** Open the file in Excel/LibreOffice to view full data."
+            
+            # Append Plotly chart as JSON if available
+            if chart_dict:
+                response += f"\n\n```json\n{json.dumps(chart_dict)}\n```"
             
             return response
             
