@@ -1,8 +1,6 @@
 """Streamlit UI for Fiscal Document Agent."""
 
-import json
 import logging
-import re
 import sys
 from pathlib import Path
 
@@ -14,6 +12,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.agent.agent_core import create_agent
+from src.utils.agent_response_parser import AgentResponseParser
 import src.database.db as database_db
 
 # Configure logging
@@ -105,124 +104,36 @@ def get_cached_db(db_path: str) -> database_db.DatabaseManager:
     return st.session_state[db_key]
 
 
-def extract_file_downloads(response_text: str) -> tuple[str, list]:
+def display_agent_response(response_text: str) -> None:
     """
-    Extract file paths from response and return remaining text + file list.
+    Display agent response with proper rendering of charts and downloads.
+    Cloud-compatible: uses in-memory BytesIO for all file operations.
     
     Args:
-        response_text: The agent's response text that may contain file paths
-        
-    Returns:
-        Tuple of (remaining_text, list_of_file_paths)
+        response_text: Full agent response to process and display
     """
-    file_paths = []
-    remaining_text = response_text
+    # Parse response into components
+    parsed = AgentResponseParser.parse_response(response_text)
     
-    # Look for file paths in reports directory
-    reports_dir = Path("./reports")
+    # Render chart if present
+    if parsed["chart"]:
+        try:
+            st.plotly_chart(
+                parsed["chart"],
+                use_container_width=True,
+                key=f"chart_{hash(str(parsed['chart'])) % 10000}"
+            )
+        except Exception as e:
+            logger.error(f"Error rendering chart: {e}")
     
-    # Pattern: mentions of files like "issues_by_type_20251030_101329.xlsx"
-    file_pattern = r'([a-zA-Z0-9_]+_\d{8}_\d{6}\.(xlsx|csv|png))'
-    matches = re.finditer(file_pattern, response_text)
+    # Render text if present
+    if parsed["text"]:
+        st.markdown(parsed["text"])
     
-    for match in matches:
-        filename = match.group(1)
-        file_path = reports_dir / filename
-        
-        if file_path.exists():
-            file_paths.append({
-                'name': filename,
-                'path': str(file_path),
-                'ext': filename.split('.')[-1]
-            })
-    
-    return remaining_text, file_paths
-
-
-def extract_and_render_plotly(response_text: str) -> str:
-    """
-    Extract Plotly JSON from response and render it, returning remaining text.
-    
-    Args:
-        response_text: The agent's response text that may contain Plotly JSON
-        
-    Returns:
-        The response text with Plotly JSON removed (rendered separately)
-    """
-    try:
-        remaining_text = response_text
-        
-        # Pattern 1: JSON in code fence with markdown backticks
-        code_fence_pattern = r'```json\n(.*?)\n```'
-        match = re.search(code_fence_pattern, response_text, re.DOTALL)
-        
-        if match:
-            json_str = match.group(1)
-            remaining_text = re.sub(code_fence_pattern, '', response_text, count=1, flags=re.DOTALL)
-        else:
-            # Pattern 2: Look for raw JSON object with Plotly structure
-            # Search for the pattern starting with { and containing "data" and "layout"
-            # This is a greedy match from first { to matching }
-            
-            # Find all potential JSON start positions
-            json_start = response_text.find('{"data"')
-            if json_start == -1:
-                json_start = response_text.find('{"marker"')
-            
-            if json_start >= 0:
-                # Try to find the closing brace by counting braces
-                brace_count = 0
-                json_end = json_start
-                in_string = False
-                escape_next = False
-                
-                for i in range(json_start, len(response_text)):
-                    char = response_text[i]
-                    
-                    if escape_next:
-                        escape_next = False
-                        continue
-                    
-                    if char == '\\':
-                        escape_next = True
-                        continue
-                    
-                    if char == '"':
-                        in_string = not in_string
-                        continue
-                    
-                    if not in_string:
-                        if char == '{':
-                            brace_count += 1
-                        elif char == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                json_end = i + 1
-                                break
-                
-                if brace_count == 0 and json_end > json_start:
-                    json_str = response_text[json_start:json_end]
-                    remaining_text = response_text[:json_start] + response_text[json_end:]
-                else:
-                    return response_text
-            else:
-                return response_text
-        
-        # Try to parse as Plotly
-        fig_dict = json.loads(json_str)
-        
-        # Verify it's a Plotly figure (has 'data' and 'layout')
-        if 'data' in fig_dict and 'layout' in fig_dict:
-            # Render the chart with proper width
-            st.plotly_chart(fig_dict, use_container_width=True, key=f"chart_{hash(json_str) % 10000}")
-            return remaining_text.strip()
-        else:
-            return response_text
-            
-    except (json.JSONDecodeError, AttributeError, KeyError, Exception) as e:
-        logger.debug(f"Could not extract Plotly chart: {e}")
-        # Not valid Plotly JSON, return original text
-        return response_text
+    # Render download button if file reference found
+    if parsed["file"]:
+        file_info = parsed["file"]
+        st.info(f"📥 **File ready for download: {file_info['filename']}'")
 
 
 def main() -> None:
@@ -315,33 +226,7 @@ def main() -> None:
         # Display chat history
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
-                # Extract and render Plotly charts
-                remaining_text = extract_and_render_plotly(message["content"])
-                
-                # Extract and render file downloads
-                remaining_text, files = extract_file_downloads(remaining_text)
-                
-                # Display remaining text
-                if remaining_text:
-                    st.markdown(remaining_text)
-                
-                # Display download buttons for files
-                if files:
-                    st.divider()
-                    for file_info in files:
-                        file_ext = file_info['ext'].upper()
-                        emoji = "📊" if file_ext == "XLSX" else "📄" if file_ext == "CSV" else "🖼️"
-                        
-                        with open(file_info['path'], "rb") as f:
-                            st.download_button(
-                                label=f"{emoji} Download {file_info['name']}",
-                                data=f.read(),
-                                file_name=file_info['name'],
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
-                                     if file_ext == "XLSX" else "text/csv" 
-                                     if file_ext == "CSV" else "image/png",
-                                key=f"download_{file_info['name']}"
-                            )
+                display_agent_response(message["content"])
 
         # Chat input
         if prompt := st.chat_input("Ask about your fiscal documents, taxes, or anything else..."):
@@ -362,33 +247,8 @@ def main() -> None:
                         try:
                             response = st.session_state.agent.chat(prompt)
                             
-                            # Extract and render Plotly charts
-                            remaining_text = extract_and_render_plotly(response)
-                            
-                            # Extract and render file downloads
-                            remaining_text, files = extract_file_downloads(remaining_text)
-                            
-                            # Display remaining text
-                            if remaining_text:
-                                st.markdown(remaining_text)
-                            
-                            # Display download buttons for files
-                            if files:
-                                st.divider()
-                                for file_info in files:
-                                    file_ext = file_info['ext'].upper()
-                                    emoji = "📊" if file_ext == "XLSX" else "📄" if file_ext == "CSV" else "🖼️"
-                                    
-                                    with open(file_info['path'], "rb") as f:
-                                        st.download_button(
-                                            label=f"{emoji} Download {file_info['name']}",
-                                            data=f.read(),
-                                            file_name=file_info['name'],
-                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
-                                                 if file_ext == "XLSX" else "text/csv" 
-                                                 if file_ext == "CSV" else "image/png",
-                                            key=f"download_{file_info['name']}"
-                                        )
+                            # Display agent response with proper rendering
+                            display_agent_response(response)
                             
                             st.session_state.messages.append({"role": "assistant", "content": response})
                         except (ValueError, KeyError, RuntimeError, TimeoutError) as e:
