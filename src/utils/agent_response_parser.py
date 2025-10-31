@@ -154,6 +154,63 @@ class AgentResponseParser:
         return response_text, None
 
     @staticmethod
+    def extract_download_marker(response_text: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """
+        Extract chart export download marker from agent response.
+        
+        Looks for patterns like:
+        ```
+        DOWNLOAD_FILE:chart_export_20251030_101329.csv:text/csv:512
+        ```
+        
+        Format: DOWNLOAD_FILE:{filename}:{mime_type}:{file_size}
+
+        Args:
+            response_text: Agent response
+
+        Returns:
+            Tuple of (remaining_text, download_info_dict or None)
+        """
+        try:
+            # Pattern: DOWNLOAD_FILE:{filename}:{mime_type}:{size}
+            marker_pattern = r'DOWNLOAD_FILE:([^:]+):([^:]+):(\d+)'
+            match = re.search(marker_pattern, response_text)
+            
+            if match:
+                filename = match.group(1)
+                mime_type = match.group(2)
+                file_size = int(match.group(3))
+                
+                # Remove marker from text (including surrounding code fence markers)
+                # Pattern: ```\nDOWNLOAD_FILE:...\n```
+                remaining_text = re.sub(
+                    r'```\s*\nDOWNLOAD_FILE:[^:]+:[^:]+:\d+\s*\n```',
+                    '',
+                    response_text,
+                    flags=re.DOTALL
+                )
+                
+                # If not found with fences, try without
+                if remaining_text == response_text:
+                    remaining_text = re.sub(
+                        r'DOWNLOAD_FILE:[^:]+:[^:]+:\d+',
+                        '',
+                        response_text
+                    )
+                
+                logger.debug(f"Found download marker for: {filename}")
+                
+                return remaining_text.strip(), {
+                    "filename": filename,
+                    "mime_type": mime_type,
+                    "file_size": file_size
+                }
+        except Exception as e:
+            logger.debug(f"Could not extract download marker: {e}")
+        
+        return response_text, None
+
+    @staticmethod
     def parse_response(response_text: str) -> Dict[str, Any]:
         """
         Parse full agent response into structured components.
@@ -166,15 +223,23 @@ class AgentResponseParser:
             - text: Remaining markdown text
             - chart: Plotly dict if present
             - file: File reference dict if present
+            - download: Download marker info if present (for chart exports)
         """
         result = {
             "text": response_text,
             "chart": None,
-            "file": None
+            "file": None,
+            "download": None
         }
         
-        # Extract chart first
-        text, chart = AgentResponseParser.extract_plotly_chart(response_text)
+        # Extract download marker first (highest priority)
+        text, download_info = AgentResponseParser.extract_download_marker(response_text)
+        if download_info:
+            result["download"] = download_info
+            result["text"] = text
+        
+        # Extract chart
+        text, chart = AgentResponseParser.extract_plotly_chart(result["text"])
         if chart:
             result["chart"] = chart
             result["text"] = text

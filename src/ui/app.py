@@ -13,6 +13,7 @@ import streamlit as st
 
 from src.agent.agent_core import create_agent
 from src.utils.agent_response_parser import AgentResponseParser
+from src.agent.chart_export_tool import get_pending_download, clear_pending_download
 import src.database.db as database_db
 
 # Configure logging
@@ -118,17 +119,25 @@ def display_agent_response(response_text: str) -> None:
     # Debug: log what was found
     has_chart = parsed["chart"] is not None
     has_file = parsed["file"] is not None
-    logger.info(f"Parsed response - Chart: {has_chart}, File: {has_file}, Text length: {len(parsed['text'])}")
+    has_download = parsed["download"] is not None
+    logger.info(f"Parsed response - Chart: {has_chart}, File: {has_file}, Download: {has_download}, Text length: {len(parsed['text'])}")
+    
+    if has_chart:
+        logger.info(f"✓ Chart found with keys: {list(parsed['chart'].keys())}")
+    
+    if has_download:
+        logger.info(f"✓ Download marker found for: {parsed['download']['filename']}")
     
     # Render chart if present
     if parsed["chart"]:
         try:
-            logger.info(f"Rendering chart with keys: {list(parsed['chart'].keys())}")
+            logger.info(f"Rendering chart with st.plotly_chart()...")
             st.plotly_chart(
                 parsed["chart"],
                 use_container_width=True,
                 key=f"chart_{hash(str(parsed['chart'])) % 10000}"
             )
+            logger.info(f"✓ Chart rendered successfully")
         except Exception as e:
             logger.error(f"Error rendering chart: {e}", exc_info=True)
             st.error(f"Error displaying chart: {e}")
@@ -137,7 +146,45 @@ def display_agent_response(response_text: str) -> None:
     if parsed["text"]:
         st.markdown(parsed["text"])
     
-    # Render download button if file reference found
+    # Render download button if download marker found
+    if parsed["download"]:
+        download_info = parsed["download"]
+        filename = download_info["filename"]
+        mime_type = download_info["mime_type"]
+        
+        try:
+            # Retrieve the file bytes from pending downloads
+            download_data = get_pending_download(filename)
+            
+            if download_data:
+                file_bytes, actual_mime_type = download_data
+                
+                # Use mime_type from marker if available, otherwise from stored data
+                actual_mime = mime_type if mime_type else actual_mime_type
+                
+                logger.info(f"Rendering download button for: {filename} ({actual_mime})")
+                
+                # Render download button
+                st.download_button(
+                    label=f"📥 Download {filename}",
+                    data=file_bytes,
+                    file_name=filename,
+                    mime=actual_mime,
+                    key=f"download_{hash(filename) % 10000}"
+                )
+                
+                # Clear from storage after rendering
+                clear_pending_download(filename)
+                logger.info(f"✓ Download button rendered and file cleared from storage")
+            else:
+                st.warning(f"⚠️ File '{filename}' not found in storage. This may have already been downloaded.")
+                logger.warning(f"Download marker found but file not in storage: {filename}")
+                
+        except Exception as e:
+            logger.error(f"Error rendering download button: {e}", exc_info=True)
+            st.error(f"Error rendering download: {e}")
+    
+    # Render file info if traditional file reference found
     if parsed["file"]:
         file_info = parsed["file"]
         st.info(f"📥 **File ready for download: {file_info['filename']}'")
@@ -253,6 +300,13 @@ def main() -> None:
                     with st.spinner("🤔 Thinking..."):
                         try:
                             response = st.session_state.agent.chat(prompt)
+                            
+                            # Debug: log the raw response for troubleshooting
+                            logger.info(f"Raw agent response ({len(response)} chars): {response[:200]}")
+                            if "```json" in response:
+                                logger.info("✓ Response contains ```json code fences")
+                            else:
+                                logger.warning("⚠️ Response does NOT contain ```json code fences")
                             
                             # Display agent response with proper rendering
                             display_agent_response(response)

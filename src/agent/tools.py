@@ -1156,6 +1156,9 @@ from src.agent.archiver_tools import ALL_ARCHIVER_TOOLS
 from .report_tool import FiscalReportExportTool
 fiscal_report_export_tool = FiscalReportExportTool()
 
+# Import chart export tool
+from .chart_export_tool import chart_export_tool
+
 # All tools list
 ALL_TOOLS = [
     parse_xml_tool,
@@ -1170,6 +1173,7 @@ ALL_TOOLS = [
     remediation_tool,                   # New: SPRINT 1 - remediation suggestions
     trends_tool,                        # New: SPRINT 1 - trend analysis
     fiscal_report_export_tool,          # CSV/XLSX file export for download
+    chart_export_tool,                  # NEW: Export charts to CSV/XML/HTML/PNG
     *ALL_BUSINESS_TOOLS,                # Includes 'generate_report' for interactive charts
     *ALL_ARCHIVER_TOOLS,
 ]

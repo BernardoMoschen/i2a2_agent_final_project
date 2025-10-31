@@ -170,7 +170,7 @@ class ReportGeneratorTool(BaseTool):
             height=400,
         )
         
-        # Convert to JSON for Streamlit
+        # Convert to JSON for Streamlit with code fence markers
         chart_json = fig.to_json()
         
         total = sum(values)
@@ -184,9 +184,11 @@ class ReportGeneratorTool(BaseTool):
 💰 Valor total: R$ {total:,.2f}
 📊 Média mensal: R$ {avg:,.2f}
 
-🎨 Gráfico gerado (ver abaixo)
+🎨 Gráfico gerado:
 
+```json
 {chart_json}
+```
 """
 
     def _generate_purchases_by_month(self, db: DatabaseManager, days_back: int) -> str:
@@ -242,9 +244,11 @@ class ReportGeneratorTool(BaseTool):
 💰 Valor total: R$ {total:,.2f}
 📊 Média mensal: R$ {avg:,.2f}
 
-🎨 Gráfico gerado (ver abaixo)
+🎨 Gráfico gerado:
 
+```json
 {chart_json}
+```
 """
 
     def _generate_taxes_breakdown(self, db: DatabaseManager, days_back: int) -> str:
@@ -303,7 +307,7 @@ class ReportGeneratorTool(BaseTool):
             percentage = (value / total_taxes * 100) if total_taxes > 0 else 0
             result += f"\n- {tax}: R$ {value:,.2f} ({percentage:.1f}%)"
         
-        result += f"\n\n🎨 Gráfico gerado (ver abaixo)\n\n{chart_json}"
+        result += f"\n\n🎨 Gráfico gerado:\n\n```json\n{chart_json}\n```"
         
         return result
 
@@ -365,9 +369,11 @@ class ReportGeneratorTool(BaseTool):
 📄 Total de notas: {len(invoices)}
 💰 Valor total: R$ {total:,.2f}
 
-🎨 Gráfico gerado (ver abaixo)
+🎨 Gráfico gerado:
 
+```json
 {chart_json}
+```
 """
 
     def _generate_invoices_timeline(self, db: DatabaseManager, days_back: int) -> str:
@@ -420,9 +426,11 @@ class ReportGeneratorTool(BaseTool):
 📄 Total de documentos: {total}
 📊 Média diária: {avg:.1f} documentos
 
-🎨 Gráfico gerado (ver abaixo)
+🎨 Gráfico gerado:
 
+```json
 {chart_json}
+```
 """
 
     def _generate_issues_by_severity(self, db: DatabaseManager, year: int = None) -> str:
@@ -523,7 +531,7 @@ class ReportGeneratorTool(BaseTool):
             for i, (code, count) in enumerate(sorted_issues[:5], 1):
                 summary += f"\n{i}. **[{code}]** - {count} ocorrência(s)"
             
-            summary += f"\n\n🎨 Gráfico gerado (ver abaixo)\n\n{chart_json}"
+            summary += f"\n\n🎨 Gráfico gerado:\n\n```json\n{chart_json}\n```"
             
             return summary
             
