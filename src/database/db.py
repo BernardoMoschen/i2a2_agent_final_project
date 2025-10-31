@@ -907,15 +907,55 @@ class DatabaseManager:
 
             return session.exec(statement).one()
 
-    def get_statistics(self) -> dict:
-        """Get database statistics."""
+    def get_statistics(self, year: Optional[int] = None, month: Optional[int] = None) -> dict:
+        """Get database statistics, optionally filtered by year/month."""
+        from datetime import datetime as dt_module
+        
         with Session(self.engine) as session:
-            total_invoices = len(session.exec(select(InvoiceDB)).all())
-            total_items = len(session.exec(select(InvoiceItemDB)).all())
-            total_issues = len(session.exec(select(ValidationIssueDB)).all())
+            query = select(InvoiceDB)
+            
+            # Apply year/month filters if provided
+            if year:
+                start_date = dt_module(year, month if month else 1, 1)
+                if month:
+                    # For specific month, go to the last day of that month
+                    if month == 12:
+                        end_date = dt_module(year + 1, 1, 1)
+                    else:
+                        end_date = dt_module(year, month + 1, 1)
+                else:
+                    # For whole year
+                    end_date = dt_module(year + 1, 1, 1)
+                
+                query = query.where(
+                    (InvoiceDB.issue_date >= start_date) &
+                    (InvoiceDB.issue_date < end_date)
+                )
+            
+            invoices = session.exec(query).all()
+            total_invoices = len(invoices)
+            
+            # Get items for these invoices
+            if invoices:
+                invoice_ids = [inv.id for inv in invoices]
+                items_query = select(InvoiceItemDB).where(InvoiceItemDB.invoice_id.in_(invoice_ids))
+                items = session.exec(items_query).all()
+            else:
+                items = []
+            
+            total_items = len(items)
+            
+            # Get issues for these invoices
+            if invoices:
+                invoice_ids = [inv.id for inv in invoices]
+                issues_query = select(ValidationIssueDB).where(ValidationIssueDB.invoice_id.in_(invoice_ids))
+                issues = session.exec(issues_query).all()
+            else:
+                issues = []
+            
+            total_issues = len(issues)
             
             # Get totals by document type
-            invoices = session.exec(select(InvoiceDB)).all()
             by_type = {}
             total_value = Decimal("0")
             
@@ -930,6 +970,7 @@ class DatabaseManager:
                 "by_type": by_type,
                 "total_value": float(total_value),
             }
+
 
     def delete_invoice(self, document_key: str) -> bool:
         """Delete invoice by document key."""

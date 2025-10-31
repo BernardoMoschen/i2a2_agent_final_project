@@ -292,6 +292,8 @@ class SearchInvoicesInput(BaseModel):
     issuer_cnpj: Optional[str] = Field(None, description="Filter by issuer CNPJ (14 digits)")
     days_back: Optional[int] = Field(9999, description="Search last N days. Default is 9999 to search ALL documents ever processed. ALWAYS use 9999 when user asks about counts, years, or 'all' documents.")
     specific_date: Optional[str] = Field(None, description="Search for documents on a specific date (format: DD/MM/YYYY or YYYY-MM-DD). When used, days_back is ignored.")
+    year: Optional[int] = Field(None, description="Filter by specific year (e.g., 2024). When provided, ignores days_back.")
+    month: Optional[int] = Field(None, description="Filter by specific month (1-12), requires year. When provided, returns only documents from that year/month.")
 
 
 class DatabaseSearchTool(BaseTool):
@@ -301,24 +303,24 @@ class DatabaseSearchTool(BaseTool):
     description: str = """
     Search for fiscal documents stored in the database with flexible filters.
     
-    🚨 CRITICAL: When user asks about counting or listing documents, you MUST use days_back=9999!
+    🚨 CRITICAL: When user asks about counting or listing documents, use appropriate filters!
     
     ⚠️ MANDATORY RULES (YOU MUST FOLLOW):
-    1. ANY question with "quantas", "quantos", "how many", "count", "total" → days_back=9999
-    2. ANY question about a specific YEAR (2024, 2023, etc.) → days_back=9999
+    1. ANY question with "quantas", "quantos", "how many", "count", "total" → days_back=9999 (unless year specified)
+    2. ANY question about a specific YEAR (2024, 2023, etc.) → year=2024 (DO NOT use days_back when year is available)
     3. ANY question with "todas", "todos", "all", "list", "mostre", "traga" → days_back=9999
-    4. ANY question about specific dates → days_back=9999
-    5. Documents in database may be from any year → ALWAYS use days_back=9999
+    4. ANY question about specific dates → specific_date parameter
+    5. Documents in database may be from any year → ALWAYS use year parameter when user mentions a year
     
     ✅ CORRECT USAGE EXAMPLES:
     - "Quantas notas de compra?" → {"operation_type": "purchase", "days_back": 9999}
-    - "Documentos de 2024?" → {"days_back": 9999}
-    - "Me traga 5 XMLs de 2024" → {"days_back": 9999}
-    - "Há documento na data 2024-01-19?" → {"days_back": 9999}
+    - "Documentos de 2024?" → {"year": 2024}
+    - "Compras em 2024?" → {"operation_type": "purchase", "year": 2024}
+    - "Documentos em janeiro/2024?" → {"year": 2024, "month": 1}
     - "Total de documentos" → {"days_back": 9999}
     
     ❌ WRONG - DO NOT DO THIS:
-    - Using days_back=30 or days_back=365 for ANY query
+    - Using days_back=9999 when year parameter is available
     - Using "limit" parameter (not supported - tool returns up to 100 results)
     
     OPERATION TYPE MAPPING:
@@ -338,10 +340,13 @@ class DatabaseSearchTool(BaseTool):
         issuer_cnpj: Optional[str] = None,
         days_back: int = 9999,
         specific_date: Optional[str] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
         **kwargs,
     ) -> str:
         """Search invoices in database."""
         import json
+        from datetime import datetime as dt_module
         
         # Handle case where LangChain passes all params as a dict (or JSON string) to first argument
         if isinstance(document_type, dict):
@@ -351,6 +356,8 @@ class DatabaseSearchTool(BaseTool):
             issuer_cnpj = params.get('issuer_cnpj')
             days_back = params.get('days_back', 9999)
             specific_date = params.get('specific_date')
+            year = params.get('year')
+            month = params.get('month')
         elif isinstance(document_type, str) and document_type.startswith('{'):
             # Handle JSON string (LangChain sometimes sends JSON strings)
             try:
@@ -360,11 +367,13 @@ class DatabaseSearchTool(BaseTool):
                 issuer_cnpj = params.get('issuer_cnpj')
                 days_back = params.get('days_back', 9999)
                 specific_date = params.get('specific_date')
+                year = params.get('year')
+                month = params.get('month')
             except json.JSONDecodeError:
                 pass  # Not JSON, treat as normal string
         
         try:
-            logger.info(f"DatabaseSearchTool FINAL params: document_type={document_type}, operation_type={operation_type}, issuer_cnpj={issuer_cnpj}, days_back={days_back}, specific_date={specific_date}")
+            logger.info(f"DatabaseSearchTool FINAL params: document_type={document_type}, operation_type={operation_type}, issuer_cnpj={issuer_cnpj}, days_back={days_back}, specific_date={specific_date}, year={year}, month={month}")
             
             # Create database connection (no state stored)
             db = DatabaseManager("sqlite:///fiscal_documents.db")
@@ -374,8 +383,28 @@ class DatabaseSearchTool(BaseTool):
             end_date = None
             date_label = ""
             
-            if specific_date:
-                from datetime import datetime as dt_module
+            # Priority: year/month > specific_date > days_back
+            if year:
+                # Year filtering takes priority
+                start_date = dt_module(year, month if month else 1, 1)
+                if month:
+                    # For specific month, go to the last day of that month
+                    if month == 12:
+                        end_date = dt_module(year + 1, 1, 1)
+                    else:
+                        end_date = dt_module(year, month + 1, 1)
+                else:
+                    # For whole year
+                    end_date = dt_module(year + 1, 1, 1)
+                
+                if month:
+                    date_label = f"{month:02d}/{year}"
+                else:
+                    date_label = str(year)
+                
+                days_back = None  # Ignore days_back when year is provided
+                specific_date = None
+            elif specific_date:
                 # Parse the date in different formats
                 parsed_date = None
                 for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"]:
@@ -501,16 +530,28 @@ Para ver TODOS os documentos sem filtros, use days_back=9999 sem outros parâmet
         document_type: Optional[str] = None,
         operation_type: Optional[str] = None,
         issuer_cnpj: Optional[str] = None,
-        days_back: int = 3650,
+        days_back: int = 9999,
+        specific_date: Optional[str] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
     ) -> str:
         """Async version."""
-        return self._run(document_type, operation_type, issuer_cnpj, days_back)
+        return self._run(
+            document_type=document_type,
+            operation_type=operation_type,
+            issuer_cnpj=issuer_cnpj,
+            days_back=days_back,
+            specific_date=specific_date,
+            year=year,
+            month=month,
+        )
 
 
 class GetStatisticsInput(BaseModel):
     """Input schema for getting database statistics."""
 
-    pass  # No input needed
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12), requires year")
 
 
 class DatabaseStatsTool(BaseTool):
@@ -529,16 +570,24 @@ class DatabaseStatsTool(BaseTool):
     """
     args_schema: type[BaseModel] = GetStatisticsInput
 
-    def _run(self) -> str:
+    def _run(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
         """Get database statistics."""
         try:
             # Create database connection (no state stored)
             db = DatabaseManager("sqlite:///fiscal_documents.db")
             
-            stats = db.get_statistics()
+            stats = db.get_statistics(year=year, month=month)
+            
+            # Build period string for display
+            period_str = ""
+            if year:
+                if month:
+                    period_str = f" em {month:02d}/{year}"
+                else:
+                    period_str = f" em {year}"
             
             result = f"""
-📊 **Estatísticas do Banco de Dados**
+📊 **Estatísticas do Banco de Dados{period_str}**
 
 **Totais:**
 - 📄 Documentos processados: {stats['total_invoices']}
@@ -560,9 +609,9 @@ class DatabaseStatsTool(BaseTool):
         except Exception as e:
             return f"❌ Erro ao obter estatísticas: {str(e)}"
 
-    async def _arun(self) -> str:
+    async def _arun(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
         """Async version."""
-        return self._run()
+        return self._run(year=year, month=month)
 
 
 class AnalyzeValidationIssuesInput(BaseModel):

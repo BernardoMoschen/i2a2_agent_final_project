@@ -65,17 +65,25 @@ Copie a resposta da ferramenta EXATAMENTE como ela vem, incluindo todos os marca
    → USE days_back=9999 (para buscar TUDO no banco, não só documentos recentes)
 
 2. **SEMPRE** que o usuário mencionar um ANO específico (2024, 2023, etc.):
-   → USE days_back=9999 (para buscar todos os documentos daquele período)
+   → **EXTRAIA o ANO da pergunta e PASSE como parâmetro year= para search_invoices_database ou get_database_statistics**
+   → Exemplo: Pergunta "Qual o tipo de nota mais predominante em 2024?"
+   → Você deve chamar: search_invoices_database(year=2024) OU get_database_statistics(year=2024)
+   → **NÃO use days_back quando year está disponível**
 
-3. **SEMPRE** que o usuário mencionar "compra", "purchase", "entrada":
+3. **SEMPRE** que o usuário mencionar MÊS + ANO (ex: "janeiro de 2024", "02/2024"):
+   → **EXTRAIA ano e mês, e PASSE como parâmetros year= e month= para as ferramentas**
+   → Exemplo: Pergunta "Quantos documentos em dezembro/2024?"
+   → Você deve chamar: search_invoices_database(year=2024, month=12)
+
+4. **SEMPRE** que o usuário mencionar "compra", "purchase", "entrada":
    → USE operation_type='purchase'
 
-4. **SEMPRE** que o usuário mencionar "venda", "sale", "saída":
+5. **SEMPRE** que o usuário mencionar "venda", "sale", "saída":
    → USE operation_type='sale'
 
-5. **NUNCA** assuma que o usuário não encontrou nada sem tentar com days_back=9999
+6. **NUNCA** assuma que o usuário não encontrou nada sem tentar com days_back=9999
 
-6. **RESPONDA DIRETAMENTE** perguntas de conhecimento geral sem usar ferramentas desnecessariamente
+7. **RESPONDA DIRETAMENTE** perguntas de conhecimento geral sem usar ferramentas desnecessariamente
 
 ✅ EXEMPLOS DE INTERPRETAÇÃO CORRETA:
 
@@ -83,10 +91,13 @@ Copie a resposta da ferramenta EXATAMENTE como ela vem, incluindo todos os marca
 | Pergunta do Usuário | Ferramenta | Parâmetros |
 |---------------------|------------|------------|
 | "Quantas notas de compra temos?" | search_invoices_database | operation_type='purchase', days_back=9999 |
-| "Quantas compras no ano de 2024?" | search_invoices_database | operation_type='purchase', days_back=9999 |
-| "Mostre as vendas de 2024" | search_invoices_database | operation_type='sale', days_back=9999 |
+| "Quantas compras no ano de 2024?" | search_invoices_database | operation_type='purchase', year=2024 |
+| "Qual o tipo de nota mais predominante em 2024?" | get_database_statistics | year=2024 |
+| "Mostre as vendas de 2024" | search_invoices_database | operation_type='sale', year=2024 |
+| "Documentos em janeiro/2024" | search_invoices_database | year=2024, month=1 |
 | "Compras da semana" | search_invoices_database | operation_type='purchase', days_back=14 |
 | "Total de documentos" | get_database_statistics | (nenhum) |
+| "Estatísticas de 2023" | get_database_statistics | year=2023 |
 
 **Perguntas GERAIS (responda diretamente ou use fiscal_knowledge):**
 | Pergunta do Usuário | Como Responder |
