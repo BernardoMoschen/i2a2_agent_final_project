@@ -339,15 +339,117 @@ for rule in rules["ncm_mappings"]:
     classifier.update_ncm_mappings({ncm_tuple: rule["cost_center"]})
 ```
 
+## Integração no Fluxo de Processamento
+
+A classificação acontece **automaticamente** sempre que você faz upload de um XML:
+
+```
+Upload XML → Parse → Validate → 🆕 Classify → Save to Database
+```
+
+### Quando a classificação acontece
+
+A classificação é executada **AUTOMATICAMENTE** em:
+
+- ✅ Upload de arquivo XML individual
+- ✅ Upload de arquivo ZIP com múltiplos XMLs
+- ✅ Processamento via interface Streamlit
+- ✅ Processamento via API/código Python
+
+### Como funciona
+
+```python
+# Quando você faz upload via Streamlit ou processa diretamente:
+processor = FileProcessor(auto_classify=True)  # ✅ Ativado por padrão
+results = processor.process_file(xml_bytes, "nota.xml")
+
+# Resultado inclui classificação:
+filename, invoice, issues, classification = results[0]
+```
+
+### Dados Salvos no Banco
+
+Toda nota processada agora inclui:
+
+- ✅ **operation_type**: purchase, sale, transfer, return
+- ✅ **cost_center**: "TI - Equipamentos", "RH - Benefícios", etc.
+- ✅ **classification_confidence**: 0.85 (85%)
+- ✅ **classification_reasoning**: "NCM 84713012 matched to TI - Equipamentos"
+- ✅ **used_llm_fallback**: True/False
+
+### Visualização na Interface
+
+#### Tab "Upload"
+
+Quando você faz upload, verá:
+
+```
+📄 NFe 1234 - FORNECEDOR TESTE
+
+  🏷️ Classificação
+  Tipo de Operação: 📥 Purchase
+  Centro de Custo: 🏢 TI - Equipamentos
+  Confiança: 🟢 Alta (85%)
+  💡 Justificativa: NCM 84715000 matched to TI - Equipamentos
+```
+
+#### Tab "History"
+
+Todos os documentos já processados mostram sua classificação persistida no banco.
+
+### Exemplo Prático
+
+```python
+from src.utils.file_processing import FileProcessor
+
+# Processar nota
+processor = FileProcessor(auto_classify=True)
+with open("nota.xml", "rb") as f:
+    results = processor.process_file(f.read(), "nota.xml")
+
+# Verificar classificação
+filename, invoice, issues, classification = results[0]
+
+print(f"Tipo: {classification['operation_type']}")
+print(f"Centro de Custo: {classification['cost_center']}")
+print(f"Confiança: {classification['confidence']:.0%}")
+```
+
+**Saída:**
+
+```
+Tipo: purchase
+Centro de Custo: TI - Equipamentos
+Confiança: 85%
+```
+
+## Migração de Banco de Dados
+
+Se você já tem um banco antigo:
+
+```bash
+# OPÇÃO 1: Deletar e recriar (perde dados!)
+rm fiscal_documents.db
+python -c "from src.database.db import DatabaseManager; DatabaseManager()"
+
+# OPÇÃO 2: Adicionar colunas manualmente (preserva dados)
+sqlite3 fiscal_documents.db
+ALTER TABLE invoices ADD COLUMN operation_type TEXT;
+ALTER TABLE invoices ADD COLUMN cost_center TEXT;
+ALTER TABLE invoices ADD COLUMN classification_confidence REAL;
+ALTER TABLE invoices ADD COLUMN classification_reasoning TEXT;
+ALTER TABLE invoices ADD COLUMN used_llm_fallback BOOLEAN DEFAULT 0;
+```
+
 ## Próximos Passos (Roadmap)
 
 ### Curto Prazo
 
 - [x] Implementação básica com regras CFOP e NCM
 - [x] Testes unitários (13 testes, 100% cobertura)
-- [ ] Integração com FileProcessor para classificação automática no upload
-- [ ] Adicionar campos ao banco de dados
-- [ ] Exibir classificação na UI (tabs History e Upload)
+- [x] Integração com FileProcessor para classificação automática no upload
+- [x] Adicionar campos ao banco de dados
+- [x] Exibir classificação na UI (tabs History e Upload)
 
 ### Médio Prazo
 
