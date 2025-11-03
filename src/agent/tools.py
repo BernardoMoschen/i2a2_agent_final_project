@@ -290,10 +290,17 @@ class SearchInvoicesInput(BaseModel):
     document_type: Optional[str] = Field(None, description="Filter by document type: NFe, NFCe, CTe, or MDFe")
     operation_type: Optional[str] = Field(None, description="Filter by operation type: purchase (compra), sale (venda), transfer (transferência), or return (devolução)")
     issuer_cnpj: Optional[str] = Field(None, description="Filter by issuer CNPJ (14 digits)")
-    days_back: Optional[int] = Field(9999, description="Search last N days. Default is 9999 to search ALL documents ever processed. ALWAYS use 9999 when user asks about counts, years, or 'all' documents.")
+    recipient_cnpj: Optional[str] = Field(None, description="Filter by recipient CNPJ or CPF")
+    modal: Optional[str] = Field(None, description="Filter by transport modal (1=Rodoviário, 2=Aéreo, 3=Aquaviário, 4=Ferroviário, 5=Dutoviário)")
+    cost_center: Optional[str] = Field(None, description="Filter by cost center (exact match)")
+    min_confidence: Optional[float] = Field(None, description="Filter by minimum classification confidence (0-1)")
+    q: Optional[str] = Field(None, description="Full-text search on issuer/recipient names and item descriptions")
+    days_back: Optional[int] = Field(9999, description="Search last N days. Default is 9999 to search ALL documents ever processed.")
     specific_date: Optional[str] = Field(None, description="Search for documents on a specific date (format: DD/MM/YYYY or YYYY-MM-DD). When used, days_back is ignored.")
     year: Optional[int] = Field(None, description="Filter by specific year (e.g., 2024). When provided, ignores days_back.")
     month: Optional[int] = Field(None, description="Filter by specific month (1-12), requires year. When provided, returns only documents from that year/month.")
+    start_date: Optional[str] = Field(None, description="Filter by start date (YYYY-MM-DD or DD/MM/YYYY)")
+    end_date: Optional[str] = Field(None, description="Filter by end date (YYYY-MM-DD or DD/MM/YYYY)")
 
 
 class DatabaseSearchTool(BaseTool):
@@ -301,35 +308,29 @@ class DatabaseSearchTool(BaseTool):
 
     name: str = "search_invoices_database"
     description: str = """
-    Search for fiscal documents stored in the database with flexible filters.
+    Search for fiscal documents stored in the database with flexible filters (matching Documents Explorer UI).
     
-    🚨 CRITICAL: When user asks about counting or listing documents, use appropriate filters!
+    🎯 AVAILABLE FILTERS (all optional, use any combination):
+    • document_type: NFe, NFCe, CTe, MDFe
+    • operation_type: purchase, sale, transfer, return
+    • issuer_cnpj: Issuer CNPJ (contains search)
+    • recipient_cnpj: Recipient CNPJ or CPF (contains search)
+    • modal: Transport modal (1=Road, 2=Air, 3=Water, 4=Rail, 5=Pipeline)
+    • cost_center: Cost center code (exact match)
+    • min_confidence: Minimum classification confidence (0-1)
+    • q: Full-text search (issuer names, recipient, item descriptions)
+    • year/month: Specific year and/or month
+    • start_date/end_date: Date range (YYYY-MM-DD)
+    • days_back: Last N days
     
-    ⚠️ MANDATORY RULES (YOU MUST FOLLOW):
-    1. ANY question with "quantas", "quantos", "how many", "count", "total" → days_back=9999 (unless year specified)
-    2. ANY question about a specific YEAR (2024, 2023, etc.) → year=2024 (DO NOT use days_back when year is available)
-    3. ANY question with "todas", "todos", "all", "list", "mostre", "traga" → days_back=9999
-    4. ANY question about specific dates → specific_date parameter
-    5. Documents in database may be from any year → ALWAYS use year parameter when user mentions a year
-    
-    ✅ CORRECT USAGE EXAMPLES:
-    - "Quantas notas de compra?" → {"operation_type": "purchase", "days_back": 9999}
-    - "Documentos de 2024?" → {"year": 2024}
-    - "Compras em 2024?" → {"operation_type": "purchase", "year": 2024}
-    - "Documentos em janeiro/2024?" → {"year": 2024, "month": 1}
-    - "Total de documentos" → {"days_back": 9999}
-    
-    ❌ WRONG - DO NOT DO THIS:
-    - Using days_back=9999 when year parameter is available
-    - Using "limit" parameter (not supported - tool returns up to 100 results)
-    
-    OPERATION TYPE MAPPING:
-    - "compra", "purchase", "entrada" → operation_type="purchase"
-    - "venda", "sale", "saída" → operation_type="sale"
-    - "transferência", "transfer" → operation_type="transfer"
-    - "devolução", "return" → operation_type="return"
-    
-    Returns: Count and detailed list of invoices with operation type, issuer, date, total value
+    USAGE EXAMPLES:
+    - "Quantas notas de compra?" → operation_type=purchase, days_back=9999
+    - "Documentos de 2024?" → year=2024
+    - "Vendas empresa X 2024?" → operation_type=sale, issuer_cnpj=X, year=2024
+    - "Documentos janeiro/2024?" → year=2024, month=1
+    - "Buscar fornecedor ABC?" → q=ABC, days_back=9999
+    - "Documentos confiança > 80%?" → min_confidence=0.8, days_back=9999
+    - "CTe transporte rodoviário 2024?" → document_type=CTe, modal=1, year=2024
     """
     args_schema: type[BaseModel] = SearchInvoicesInput
 
@@ -338,10 +339,17 @@ class DatabaseSearchTool(BaseTool):
         document_type: Optional[str] = None,
         operation_type: Optional[str] = None,
         issuer_cnpj: Optional[str] = None,
+        recipient_cnpj: Optional[str] = None,
+        modal: Optional[str] = None,
+        cost_center: Optional[str] = None,
+        min_confidence: Optional[float] = None,
+        q: Optional[str] = None,
         days_back: int = 9999,
         specific_date: Optional[str] = None,
         year: Optional[int] = None,
         month: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         **kwargs,
     ) -> str:
         """Search invoices in database."""
@@ -354,10 +362,17 @@ class DatabaseSearchTool(BaseTool):
             document_type = params.get('document_type')
             operation_type = params.get('operation_type')
             issuer_cnpj = params.get('issuer_cnpj')
+            recipient_cnpj = params.get('recipient_cnpj')
+            modal = params.get('modal')
+            cost_center = params.get('cost_center')
+            min_confidence = params.get('min_confidence')
+            q = params.get('q')
             days_back = params.get('days_back', 9999)
             specific_date = params.get('specific_date')
             year = params.get('year')
             month = params.get('month')
+            start_date = params.get('start_date')
+            end_date = params.get('end_date')
         elif isinstance(document_type, str) and document_type.startswith('{'):
             # Handle JSON string (LangChain sometimes sends JSON strings)
             try:
@@ -365,10 +380,17 @@ class DatabaseSearchTool(BaseTool):
                 document_type = params.get('document_type')
                 operation_type = params.get('operation_type')
                 issuer_cnpj = params.get('issuer_cnpj')
+                recipient_cnpj = params.get('recipient_cnpj')
+                modal = params.get('modal')
+                cost_center = params.get('cost_center')
+                min_confidence = params.get('min_confidence')
+                q = params.get('q')
                 days_back = params.get('days_back', 9999)
                 specific_date = params.get('specific_date')
                 year = params.get('year')
                 month = params.get('month')
+                start_date = params.get('start_date')
+                end_date = params.get('end_date')
             except json.JSONDecodeError:
                 pass  # Not JSON, treat as normal string
         
@@ -428,6 +450,11 @@ class DatabaseSearchTool(BaseTool):
                 document_type=document_type,
                 operation_type=operation_type,
                 issuer_cnpj=issuer_cnpj,
+                recipient_cnpj=recipient_cnpj,
+                modal=modal,
+                cost_center=cost_center,
+                min_confidence=min_confidence,
+                q=q,
                 days_back=days_back,
                 start_date=start_date,
                 end_date=end_date,
@@ -530,20 +557,34 @@ Para ver TODOS os documentos sem filtros, use days_back=9999 sem outros parâmet
         document_type: Optional[str] = None,
         operation_type: Optional[str] = None,
         issuer_cnpj: Optional[str] = None,
+        recipient_cnpj: Optional[str] = None,
+        modal: Optional[str] = None,
+        cost_center: Optional[str] = None,
+        min_confidence: Optional[float] = None,
+        q: Optional[str] = None,
         days_back: int = 9999,
         specific_date: Optional[str] = None,
         year: Optional[int] = None,
         month: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> str:
         """Async version."""
         return self._run(
             document_type=document_type,
             operation_type=operation_type,
             issuer_cnpj=issuer_cnpj,
+            recipient_cnpj=recipient_cnpj,
+            modal=modal,
+            cost_center=cost_center,
+            min_confidence=min_confidence,
+            q=q,
             days_back=days_back,
             specific_date=specific_date,
             year=year,
             month=month,
+            start_date=start_date,
+            end_date=end_date,
         )
 
 
