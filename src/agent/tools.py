@@ -1,11 +1,12 @@
 """LangChain tool wrappers for fiscal document processing."""
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Optional
 
 from langchain.tools import BaseTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from src.database.db import DatabaseManager
 from src.models import InvoiceModel, ValidationIssue
@@ -13,6 +14,36 @@ from src.tools.fiscal_validator import FiscalValidatorTool
 from src.tools.xml_parser import XMLParserTool
 
 logger = logging.getLogger(__name__)
+
+
+class RobustBaseTool(BaseTool):
+    """Custom BaseTool that handles JSON string inputs from LangChain agent."""
+    
+    def _to_args_and_kwargs(self, tool_input: Any, tool_call_id: Optional[str] = None) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """Override to handle string JSON inputs from LangChain ReAct agent."""
+        # If tool_input is a string that looks like JSON, try to parse it
+        if isinstance(tool_input, str):
+            try:
+                tool_input = json.loads(tool_input)
+            except (json.JSONDecodeError, ValueError):
+                # If it's not JSON, pass it as-is
+                pass
+        
+        # Call parent implementation
+        return super()._to_args_and_kwargs(tool_input, tool_call_id)
+    
+    def _parse_input(self, tool_input: Any, tool_call_id: Optional[str] = None) -> Any:
+        """Override _parse_input to handle JSON string inputs."""
+        # If tool_input is a string that looks like JSON, parse it first
+        if isinstance(tool_input, str):
+            try:
+                tool_input = json.loads(tool_input)
+            except (json.JSONDecodeError, ValueError):
+                # If parsing fails, let parent handle it
+                pass
+        
+        # Call parent implementation
+        return super()._parse_input(tool_input, tool_call_id)
 
 
 class ParseXMLInput(BaseModel):
@@ -184,45 +215,68 @@ class AnswerQuestionInput(BaseModel):
 
 
 class FiscalKnowledgeTool(BaseTool):
-    """Tool for answering general questions about Brazilian fiscal documents."""
+    """Tool for answering general questions about Brazilian fiscal documents and accounting."""
 
     name: str = "fiscal_knowledge"
     description: str = """
-    Answer general questions about Brazilian fiscal documents, tax rules, and processes.
-    Use this for questions about:
-    - What is NFe, NFCe, CTe, MDFe
-    - Tax types (ICMS, IPI, PIS, COFINS, ISS)
-    - CFOP codes and their meanings
-    - NCM classification
-    - Fiscal document requirements
-    Do NOT use this for parsing or validating specific documents.
+    Answer ANY general question about:
+    - Brazilian fiscal documents (NFe, NFCe, CTe, MDFe)
+    - Tax rules and types (ICMS, IPI, PIS, COFINS, ISS)
+    - CFOP codes, NCM classification, CST/CSOSN codes
+    - Brazilian accounting and fiscal legislation
+    - General knowledge questions (history, science, current events, etc.)
+    - Explanations, definitions, calculations, and advice
+    
+    Use this tool when the user asks something that does NOT require:
+    - Searching specific invoices in the database
+    - Parsing or validating XML documents
+    - Generating reports or visualizations
+    
+    This tool can handle BOTH fiscal-specific and general knowledge questions.
     """
     args_schema: type[BaseModel] = AnswerQuestionInput
 
     def _run(self, question: str) -> str:
-        """Provide general fiscal knowledge."""
-        # This would ideally use a knowledge base or RAG
-        # For now, return a helpful message
-        return """
-Sou um agente especializado em documentos fiscais brasileiros. Posso ajudar com:
+        """
+        Provide comprehensive answers using built-in knowledge.
+        
+        This is a placeholder that returns guidance. In production, this would:
+        1. Use the agent's LLM directly for general questions
+        2. Query a fiscal knowledge base for specific fiscal topics
+        3. Provide detailed, accurate answers
+        
+        Args:
+            question: The user's question
+            
+        Returns:
+            A comprehensive answer or guidance message
+        """
+        # Return a signal that tells the agent to use its own knowledge
+        return f"""
+🤔 **Analyzing question:** "{question}"
 
-📄 **Tipos de Documentos:**
-- NFe: Nota Fiscal Eletrônica (vendas em geral)
-- NFCe: Nota Fiscal de Consumidor Eletrônica (varejo)
-- CTe: Conhecimento de Transporte Eletrônico
-- MDFe: Manifesto Eletrônico de Documentos Fiscais
+💡 **AGENT INSTRUCTION**: This question requires general knowledge or fiscal expertise.
+Please provide a comprehensive answer using your training data and expertise.
 
-💰 **Impostos:**
-- ICMS: Imposto sobre Circulação de Mercadorias e Serviços
-- IPI: Imposto sobre Produtos Industrializados
-- PIS/COFINS: Contribuições sociais
-- ISS: Imposto sobre Serviços
+If this is about:
+- **Fiscal documents/taxes**: Explain the concept, rules, and practical applications
+- **General knowledge**: Answer directly based on your training
+- **Calculations**: Show step-by-step working
+- **Advice**: Provide helpful, accurate guidance with caveats where needed
 
-🔢 **Códigos:**
-- CFOP: Código Fiscal de Operações (ex: 5102 = venda dentro do estado)
-- NCM: Nomenclatura Comum do Mercosul (classificação de produtos)
+� **Quick Fiscal Reference:**
+- NFe: Nota Fiscal Eletrônica (general sales)
+- NFCe: Nota Fiscal de Consumidor Eletrônica (retail)
+- CTe: Conhecimento de Transporte Eletrônico (transport)
+- MDFe: Manifesto Eletrônico de Documentos Fiscais (cargo manifest)
+- ICMS: State tax on goods/services circulation
+- IPI: Federal tax on industrialized products
+- PIS/COFINS: Federal social contributions
+- ISS: Municipal tax on services
+- CFOP: Fiscal operation codes (e.g., 5102 = in-state sale)
+- NCM: Mercosul common nomenclature for product classification
 
-Para perguntas específicas, forneça mais detalhes ou um documento XML para análise!
+Now provide your detailed answer to the user's question.
 """
 
     async def _arun(self, question: str) -> str:
@@ -236,7 +290,17 @@ class SearchInvoicesInput(BaseModel):
     document_type: Optional[str] = Field(None, description="Filter by document type: NFe, NFCe, CTe, or MDFe")
     operation_type: Optional[str] = Field(None, description="Filter by operation type: purchase (compra), sale (venda), transfer (transferência), or return (devolução)")
     issuer_cnpj: Optional[str] = Field(None, description="Filter by issuer CNPJ (14 digits)")
-    days_back: Optional[int] = Field(9999, description="Search last N days. Default is 9999 to search ALL documents ever processed. ALWAYS use 9999 when user asks about counts, years, or 'all' documents.")
+    recipient_cnpj: Optional[str] = Field(None, description="Filter by recipient CNPJ or CPF")
+    modal: Optional[str] = Field(None, description="Filter by transport modal (1=Rodoviário, 2=Aéreo, 3=Aquaviário, 4=Ferroviário, 5=Dutoviário)")
+    cost_center: Optional[str] = Field(None, description="Filter by cost center (exact match)")
+    min_confidence: Optional[float] = Field(None, description="Filter by minimum classification confidence (0-1)")
+    q: Optional[str] = Field(None, description="Full-text search on issuer/recipient names and item descriptions")
+    days_back: Optional[int] = Field(9999, description="Search last N days. Default is 9999 to search ALL documents ever processed.")
+    specific_date: Optional[str] = Field(None, description="Search for documents on a specific date (format: DD/MM/YYYY or YYYY-MM-DD). When used, days_back is ignored.")
+    year: Optional[int] = Field(None, description="Filter by specific year (e.g., 2024). When provided, ignores days_back.")
+    month: Optional[int] = Field(None, description="Filter by specific month (1-12), requires year. When provided, returns only documents from that year/month.")
+    start_date: Optional[str] = Field(None, description="Filter by start date (YYYY-MM-DD or DD/MM/YYYY)")
+    end_date: Optional[str] = Field(None, description="Filter by end date (YYYY-MM-DD or DD/MM/YYYY)")
 
 
 class DatabaseSearchTool(BaseTool):
@@ -244,35 +308,29 @@ class DatabaseSearchTool(BaseTool):
 
     name: str = "search_invoices_database"
     description: str = """
-    Search for fiscal documents stored in the database with flexible filters.
+    Search for fiscal documents stored in the database with flexible filters (matching Documents Explorer UI).
     
-    🚨 CRITICAL: When user asks about counting or listing documents, you MUST use days_back=9999!
+    🎯 AVAILABLE FILTERS (all optional, use any combination):
+    • document_type: NFe, NFCe, CTe, MDFe
+    • operation_type: purchase, sale, transfer, return
+    • issuer_cnpj: Issuer CNPJ (contains search)
+    • recipient_cnpj: Recipient CNPJ or CPF (contains search)
+    • modal: Transport modal (1=Road, 2=Air, 3=Water, 4=Rail, 5=Pipeline)
+    • cost_center: Cost center code (exact match)
+    • min_confidence: Minimum classification confidence (0-1)
+    • q: Full-text search (issuer names, recipient, item descriptions)
+    • year/month: Specific year and/or month
+    • start_date/end_date: Date range (YYYY-MM-DD)
+    • days_back: Last N days
     
-    ⚠️ MANDATORY RULES (YOU MUST FOLLOW):
-    1. ANY question with "quantas", "quantos", "how many", "count", "total" → days_back=9999
-    2. ANY question about a specific YEAR (2024, 2023, etc.) → days_back=9999
-    3. ANY question with "todas", "todos", "all", "list", "mostre", "traga" → days_back=9999
-    4. ANY question about specific dates → days_back=9999
-    5. Documents in database may be from any year → ALWAYS use days_back=9999
-    
-    ✅ CORRECT USAGE EXAMPLES:
-    - "Quantas notas de compra?" → {"operation_type": "purchase", "days_back": 9999}
-    - "Documentos de 2024?" → {"days_back": 9999}
-    - "Me traga 5 XMLs de 2024" → {"days_back": 9999}
-    - "Há documento na data 2024-01-19?" → {"days_back": 9999}
-    - "Total de documentos" → {"days_back": 9999}
-    
-    ❌ WRONG - DO NOT DO THIS:
-    - Using days_back=30 or days_back=365 for ANY query
-    - Using "limit" parameter (not supported - tool returns up to 100 results)
-    
-    OPERATION TYPE MAPPING:
-    - "compra", "purchase", "entrada" → operation_type="purchase"
-    - "venda", "sale", "saída" → operation_type="sale"
-    - "transferência", "transfer" → operation_type="transfer"
-    - "devolução", "return" → operation_type="return"
-    
-    Returns: Count and detailed list of invoices with operation type, issuer, date, total value
+    USAGE EXAMPLES:
+    - "Quantas notas de compra?" → operation_type=purchase, days_back=9999
+    - "Documentos de 2024?" → year=2024
+    - "Vendas empresa X 2024?" → operation_type=sale, issuer_cnpj=X, year=2024
+    - "Documentos janeiro/2024?" → year=2024, month=1
+    - "Buscar fornecedor ABC?" → q=ABC, days_back=9999
+    - "Documentos confiança > 80%?" → min_confidence=0.8, days_back=9999
+    - "CTe transporte rodoviário 2024?" → document_type=CTe, modal=1, year=2024
     """
     args_schema: type[BaseModel] = SearchInvoicesInput
 
@@ -281,21 +339,125 @@ class DatabaseSearchTool(BaseTool):
         document_type: Optional[str] = None,
         operation_type: Optional[str] = None,
         issuer_cnpj: Optional[str] = None,
+        recipient_cnpj: Optional[str] = None,
+        modal: Optional[str] = None,
+        cost_center: Optional[str] = None,
+        min_confidence: Optional[float] = None,
+        q: Optional[str] = None,
         days_back: int = 9999,
+        specific_date: Optional[str] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        **kwargs,
     ) -> str:
         """Search invoices in database."""
+        import json
+        from datetime import datetime as dt_module
+        
+        # Handle case where LangChain passes all params as a dict (or JSON string) to first argument
+        if isinstance(document_type, dict):
+            params = document_type
+            document_type = params.get('document_type')
+            operation_type = params.get('operation_type')
+            issuer_cnpj = params.get('issuer_cnpj')
+            recipient_cnpj = params.get('recipient_cnpj')
+            modal = params.get('modal')
+            cost_center = params.get('cost_center')
+            min_confidence = params.get('min_confidence')
+            q = params.get('q')
+            days_back = params.get('days_back', 9999)
+            specific_date = params.get('specific_date')
+            year = params.get('year')
+            month = params.get('month')
+            start_date = params.get('start_date')
+            end_date = params.get('end_date')
+        elif isinstance(document_type, str) and document_type.startswith('{'):
+            # Handle JSON string (LangChain sometimes sends JSON strings)
+            try:
+                params = json.loads(document_type)
+                document_type = params.get('document_type')
+                operation_type = params.get('operation_type')
+                issuer_cnpj = params.get('issuer_cnpj')
+                recipient_cnpj = params.get('recipient_cnpj')
+                modal = params.get('modal')
+                cost_center = params.get('cost_center')
+                min_confidence = params.get('min_confidence')
+                q = params.get('q')
+                days_back = params.get('days_back', 9999)
+                specific_date = params.get('specific_date')
+                year = params.get('year')
+                month = params.get('month')
+                start_date = params.get('start_date')
+                end_date = params.get('end_date')
+            except json.JSONDecodeError:
+                pass  # Not JSON, treat as normal string
+        
         try:
-            logger.info(f"DatabaseSearchTool called with: document_type={document_type}, operation_type={operation_type}, issuer_cnpj={issuer_cnpj}, days_back={days_back}")
+            logger.info(f"DatabaseSearchTool FINAL params: document_type={document_type}, operation_type={operation_type}, issuer_cnpj={issuer_cnpj}, days_back={days_back}, specific_date={specific_date}, year={year}, month={month}")
             
             # Create database connection (no state stored)
             db = DatabaseManager("sqlite:///fiscal_documents.db")
+            
+            # Handle specific date filter
+            start_date = None
+            end_date = None
+            date_label = ""
+            
+            # Priority: year/month > specific_date > days_back
+            if year:
+                # Year filtering takes priority
+                start_date = dt_module(year, month if month else 1, 1)
+                if month:
+                    # For specific month, go to the last day of that month
+                    if month == 12:
+                        end_date = dt_module(year + 1, 1, 1)
+                    else:
+                        end_date = dt_module(year, month + 1, 1)
+                else:
+                    # For whole year
+                    end_date = dt_module(year + 1, 1, 1)
+                
+                if month:
+                    date_label = f"{month:02d}/{year}"
+                else:
+                    date_label = str(year)
+                
+                days_back = None  # Ignore days_back when year is provided
+                specific_date = None
+            elif specific_date:
+                # Parse the date in different formats
+                parsed_date = None
+                for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y"]:
+                    try:
+                        parsed_date = dt_module.strptime(specific_date, fmt)
+                        break
+                    except ValueError:
+                        continue
+                
+                if parsed_date is None:
+                    return f"❌ Formato de data inválido: '{specific_date}'. Use DD/MM/YYYY ou YYYY-MM-DD"
+                
+                # Set start and end of the specific day
+                start_date = parsed_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = parsed_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+                date_label = parsed_date.strftime("%d/%m/%Y")
+                days_back = None  # Ignore days_back when specific_date is provided
             
             # Search database with all filters
             invoices = db.search_invoices(
                 document_type=document_type,
                 operation_type=operation_type,
                 issuer_cnpj=issuer_cnpj,
+                recipient_cnpj=recipient_cnpj,
+                modal=modal,
+                cost_center=cost_center,
+                min_confidence=min_confidence,
+                q=q,
                 days_back=days_back,
+                start_date=start_date,
+                end_date=end_date,
                 limit=100,
             )
             
@@ -310,7 +472,10 @@ class DatabaseSearchTool(BaseTool):
                     filter_desc.append(f"Operação: {op_label}")
                 if issuer_cnpj:
                     filter_desc.append(f"Emitente: {issuer_cnpj}")
-                filter_desc.append(f"Período: Últimos {days_back} dias")
+                if specific_date:
+                    filter_desc.append(f"Data: {date_label}")
+                else:
+                    filter_desc.append(f"Período: Últimos {days_back} dias")
                 
                 return f"""
 🔍 Nenhum documento encontrado com os filtros:
@@ -392,16 +557,42 @@ Para ver TODOS os documentos sem filtros, use days_back=9999 sem outros parâmet
         document_type: Optional[str] = None,
         operation_type: Optional[str] = None,
         issuer_cnpj: Optional[str] = None,
-        days_back: int = 3650,
+        recipient_cnpj: Optional[str] = None,
+        modal: Optional[str] = None,
+        cost_center: Optional[str] = None,
+        min_confidence: Optional[float] = None,
+        q: Optional[str] = None,
+        days_back: int = 9999,
+        specific_date: Optional[str] = None,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> str:
         """Async version."""
-        return self._run(document_type, operation_type, issuer_cnpj, days_back)
+        return self._run(
+            document_type=document_type,
+            operation_type=operation_type,
+            issuer_cnpj=issuer_cnpj,
+            recipient_cnpj=recipient_cnpj,
+            modal=modal,
+            cost_center=cost_center,
+            min_confidence=min_confidence,
+            q=q,
+            days_back=days_back,
+            specific_date=specific_date,
+            year=year,
+            month=month,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
 
 class GetStatisticsInput(BaseModel):
     """Input schema for getting database statistics."""
 
-    pass  # No input needed
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12), requires year")
 
 
 class DatabaseStatsTool(BaseTool):
@@ -420,16 +611,24 @@ class DatabaseStatsTool(BaseTool):
     """
     args_schema: type[BaseModel] = GetStatisticsInput
 
-    def _run(self) -> str:
+    def _run(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
         """Get database statistics."""
         try:
             # Create database connection (no state stored)
             db = DatabaseManager("sqlite:///fiscal_documents.db")
             
-            stats = db.get_statistics()
+            stats = db.get_statistics(year=year, month=month)
+            
+            # Build period string for display
+            period_str = ""
+            if year:
+                if month:
+                    period_str = f" em {month:02d}/{year}"
+                else:
+                    period_str = f" em {year}"
             
             result = f"""
-📊 **Estatísticas do Banco de Dados**
+📊 **Estatísticas do Banco de Dados{period_str}**
 
 **Totais:**
 - 📄 Documentos processados: {stats['total_invoices']}
@@ -451,9 +650,579 @@ class DatabaseStatsTool(BaseTool):
         except Exception as e:
             return f"❌ Erro ao obter estatísticas: {str(e)}"
 
-    async def _arun(self) -> str:
+    async def _arun(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
         """Async version."""
-        return self._run()
+        return self._run(year=year, month=month)
+
+
+class AnalyzeValidationIssuesInput(BaseModel):
+    """Input schema for analyzing validation issues."""
+    
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12), requires year")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
+
+
+class ValidationAnalysisTool(RobustBaseTool):
+    """Tool for analyzing and reporting on validation issues."""
+
+    name: str = "analyze_validation_issues"
+    description: str = """
+    Analyze validation issues to identify the most common problems in fiscal documents.
+    
+    Use this when user asks:
+    - "qual o problema de validação mais comum em 2024?"
+    - "quais são os problemas de validação mais frequentes?"
+    - "qual erro mais ocorre nos documentos?"
+    - "problemas de validação do mês de janeiro/fevereiro/etc"
+    
+    You can optionally filter by year and month.
+    
+    Returns: A detailed analysis of the most common validation issues, their frequency, 
+    and severity levels.
+    """
+    args_schema: type[BaseModel] = AnalyzeValidationIssuesInput
+
+    def _run(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Analyze validation issues."""
+        try:
+            # Create database connection
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            
+            analysis = db.get_validation_issue_analysis(year=year, month=month, limit=10)
+            
+            if analysis["total_issues"] == 0:
+                period_str = f"{year}/{month:02d}" if month else str(year) if year else "all time"
+                return f"""
+❌ **Nenhum problema de validação encontrado**
+
+Período analisado: {period_str}
+
+Isso significa que todos os documentos foram validados com sucesso! 🎉
+"""
+            
+            # Build result
+            period_str = analysis["period"]
+            result = f"""
+📊 **Análise de Problemas de Validação**
+
+**Período:** {period_str}
+**Total de Problemas:** {analysis['total_issues']}
+
+**Distribuição por Severidade:**
+"""
+            
+            for severity, count in sorted(analysis["by_severity"].items(), key=lambda x: x[1], reverse=True):
+                severity_emoji = "🔴" if severity == "error" else "🟡" if severity == "warning" else "ℹ️"
+                result += f"\n- {severity_emoji} {severity.upper()}: {count} problema(s)"
+            
+            result += "\n\n**Top Problemas Mais Frequentes:**\n"
+            
+            for idx, issue in enumerate(analysis["common_issues"], 1):
+                result += f"\n{idx}. **[{issue['code']}]** - {issue['count']} ocorrências"
+                result += f"\n   Severidade: {issue['severity']}"
+                
+                if issue['severity_breakdown']:
+                    severity_detail = ", ".join(
+                        f"{sev}: {cnt}" 
+                        for sev, cnt in sorted(
+                            issue['severity_breakdown'].items(),
+                            key=lambda x: x[1],
+                            reverse=True
+                        )
+                    )
+                    result += f" ({severity_detail})"
+                
+                if issue['field']:
+                    result += f"\n   Campo afetado: {issue['field']}"
+                
+                if issue['sample_message']:
+                    result += f"\n   Exemplo: {issue['sample_message'][:100]}..."
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing validation issues: {e}")
+            return f"❌ Erro ao analisar problemas de validação: {str(e)}"
+
+    async def _arun(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Async version."""
+        return self._run(year=year, month=month)
+
+
+class AnalyzeIssuesByIssuerInput(BaseModel):
+    """Input schema for analyzing issues by issuer."""
+    
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12)")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
+
+
+class IssuerAnalysisTool(RobustBaseTool):
+    """Tool for analyzing validation issues by issuer."""
+
+    name: str = "analyze_issues_by_issuer"
+    description: str = """
+    Analyze validation issues grouped by issuer (supplier/emitente).
+    
+    Use this when user asks:
+    - "Qual fornecedor tem mais problemas?"
+    - "Ranking de fornecedores por taxa de erro"
+    - "Quais emitentes têm documentos com erros?"
+    - "Análise de qualidade por fornecedor"
+    
+    You can optionally filter by year and month.
+    
+    Returns: Detailed analysis of validation issues per issuer with error rates
+    and top problems for each supplier.
+    """
+    args_schema: type[BaseModel] = AnalyzeIssuesByIssuerInput
+
+    def _run(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Analyze issues by issuer."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            analysis = db.get_validation_issues_by_issuer(year=year, month=month, limit=15)
+            
+            if not analysis or not analysis.get("issuers"):
+                return f"""
+❌ **Nenhum problema de validação encontrado por emitente**
+
+Período: {analysis.get('period', 'all time')}
+"""
+            
+            result = f"""
+📊 **Análise de Problemas de Validação por Emitente**
+
+**Período:** {analysis['period']}
+**Total de Emitentes com Problemas:** {analysis['total_issuers']}
+
+"""
+            
+            for idx, issuer in enumerate(analysis["issuers"], 1):
+                result += f"""
+{idx}. **{issuer['name']}** (CNPJ: {issuer['cnpj']})
+   📄 Documentos: {issuer['document_count']}
+   🔴 Erros: {issuer['error_count']}
+   🟡 Avisos: {issuer['warning_count']}
+   📊 Taxa de Erro: {issuer['error_rate']}%
+"""
+                
+                if issuer['top_issues']:
+                    result += "   Top Problemas: "
+                    result += ", ".join([f"{code}({cnt}x)" for code, cnt in issuer['top_issues']])
+                    result += "\n"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing issues by issuer: {e}")
+            return f"❌ Erro ao analisar problemas por emitente: {str(e)}"
+
+    async def _arun(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Async version."""
+        return self._run(year=year, month=month)
+
+
+class AnalyzeIssuesByOperationInput(BaseModel):
+    """Input schema for analyzing issues by operation type."""
+    
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12)")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
+
+
+class OperationAnalysisTool(RobustBaseTool):
+    """Tool for analyzing validation issues by operation type."""
+
+    name: str = "analyze_issues_by_operation"
+    description: str = """
+    Compare validation issues across different operation types (purchase, sale, transfer, return).
+    
+    Use this when user asks:
+    - "Compras têm mais erros que vendas?"
+    - "Qual tipo de operação tem mais problemas?"
+    - "Comparação de qualidade entre compras e vendas"
+    - "Qual operação fiscal tem mais taxa de erro?"
+    
+    You can optionally filter by year and month.
+    
+    Returns: Comparison of validation metrics across all operation types.
+    """
+    args_schema: type[BaseModel] = AnalyzeIssuesByOperationInput
+
+    def _run(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Analyze issues by operation type."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            analysis = db.get_validation_issues_by_operation(year=year, month=month)
+            
+            if not analysis.get("by_operation"):
+                return f"""
+❌ **Nenhum documento encontrado para análise**
+
+Período: {analysis.get('period', 'all time')}
+"""
+            
+            result = f"""
+📊 **Comparação de Problemas por Tipo de Operação**
+
+**Período:** {analysis['period']}
+
+"""
+            
+            # Sort by error rate
+            sorted_ops = sorted(
+                analysis["by_operation"].items(),
+                key=lambda x: x[1]["error_rate"],
+                reverse=True
+            )
+            
+            for operation, metrics in sorted_ops:
+                op_label = {
+                    "purchase": "📥 COMPRAS",
+                    "sale": "📤 VENDAS",
+                    "transfer": "🔄 TRANSFERÊNCIAS",
+                    "return": "↩️ DEVOLUÇÕES",
+                    "unclassified": "❓ NÃO CLASSIFICADO"
+                }.get(operation, f"📄 {operation.upper()}")
+                
+                result += f"""
+**{op_label}**
+   📄 Documentos: {metrics['document_count']}
+   🔴 Erros: {metrics['error_count']}
+   🟡 Avisos: {metrics['warning_count']}
+   📊 Taxa de Erro: {metrics['error_rate']}%
+   📈 Média de Problemas/Doc: {metrics['avg_issues_per_doc']}
+
+"""
+            
+            # Find best and worst
+            best_op = min(sorted_ops, key=lambda x: x[1]["error_rate"])
+            worst_op = max(sorted_ops, key=lambda x: x[1]["error_rate"])
+            
+            result += f"""
+**📈 Resumo:**
+✅ Melhor: {best_op[0].upper()} ({best_op[1]['error_rate']}% de erro)
+❌ Pior: {worst_op[0].upper()} ({worst_op[1]['error_rate']}% de erro)
+"""
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing issues by operation: {e}")
+            return f"❌ Erro ao analisar por tipo de operação: {str(e)}"
+
+    async def _arun(self, year: Optional[int] = None, month: Optional[int] = None) -> str:
+        """Async version."""
+        return self._run(year=year, month=month)
+
+
+class DataQualityScoreInput(BaseModel):
+    """Input schema for data quality score."""
+    
+    year: Optional[int] = Field(default=None, description="Year to analyze (e.g., 2024). If None, uses all data.")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
+
+
+class DataQualityTool(RobustBaseTool):
+    """Tool for calculating overall data quality metrics."""
+
+    name: str = "calculate_data_quality"
+    description: str = """
+    Calculate overall data quality metrics and score (0-100 scale).
+    
+    Use this when user asks:
+    - "Qual é a qualidade dos nossos documentos?"
+    - "Qual % dos documentos tem erros?"
+    - "Score de qualidade dos dados"
+    - "Dashboard de qualidade"
+    - "Como está a integridade dos dados?"
+    
+    Optionally filter by year.
+    
+    Returns: Quality metrics including completeness, accuracy, consistency,
+    and overall quality score.
+    """
+    args_schema: type[BaseModel] = DataQualityScoreInput
+
+    def _run(self, year: Optional[int] = None) -> str:
+        """Calculate data quality score."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            quality = db.calculate_data_quality_score(year=year)
+            
+            if quality["documents_analyzed"] == 0:
+                return f"""
+❌ **Nenhum documento para análise**
+
+Período: {'Year ' + str(year) if year else 'all time'}
+"""
+            
+            # Determine quality level
+            score = quality["overall_score"]
+            if score >= 90:
+                emoji = "🟢"
+                level = "EXCELENTE"
+            elif score >= 80:
+                emoji = "🟡"
+                level = "BOM"
+            elif score >= 70:
+                emoji = "🟠"
+                level = "ACEITÁVEL"
+            else:
+                emoji = "🔴"
+                level = "CRÍTICO"
+            
+            result = f"""
+📊 **Análise de Qualidade de Dados**
+
+**Período:** {'Year ' + str(year) if year else 'all time'}
+
+{emoji} **Score Geral: {quality['overall_score']}/100 ({level})**
+
+**Resumo:**
+- 📄 Documentos Analisados: {quality['documents_analyzed']}
+- ✅ Documentos Sem Problemas: {quality['documents_clean']}
+- 🔴 Documentos com Erros: {quality['documents_with_errors']}
+- 🟡 Documentos com Avisos: {quality['documents_with_warnings']}
+
+**Problemas Detectados:**
+- 🔴 Total de Erros: {quality['error_count']} ({quality['error_rate']}%)
+- 🟡 Total de Avisos: {quality['warning_count']} ({quality['warning_rate']}%)
+- 📊 Total de Problemas: {quality['total_issues']}
+
+**Métricas Detalhadas:**
+- ✅ Completeness: {quality['metrics']['completeness']}/100
+- 🎯 Accuracy: {quality['metrics']['accuracy']}/100
+- 🔗 Consistency: {quality['metrics']['consistency']}/100
+"""
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error calculating data quality: {e}")
+            return f"❌ Erro ao calcular qualidade dos dados: {str(e)}"
+
+    async def _arun(self, year: Optional[int] = None) -> str:
+        """Async version."""
+        return self._run(year=year)
+
+
+class RemediationSuggestionsInput(BaseModel):
+    """Input schema for remediation suggestions."""
+    
+    year: Optional[int] = Field(default=None, description="Year to filter by (e.g., 2024)")
+    month: Optional[int] = Field(default=None, description="Month to filter by (1-12)")
+    limit: int = Field(default=10, description="Max number of suggestions (default 10)")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
+
+
+class RemediationTool(RobustBaseTool):
+    """Tool for getting remediation suggestions for validation issues."""
+
+    name: str = "get_remediation_suggestions"
+    description: str = """
+    Get remediation suggestions for the most common validation issues.
+    
+    Use this when user asks:
+    - "Como corrigir os erros?"
+    - "Quais ações tomar para resolver os problemas?"
+    - "Sugestões de remediação"
+    - "Como melhorar a qualidade?"
+    
+    Returns: Prioritized list of issues with recommended actions and steps to fix.
+    """
+    args_schema: type[BaseModel] = RemediationSuggestionsInput
+
+    def _run(
+        self, 
+        year: Optional[int] = None, 
+        month: Optional[int] = None,
+        limit: int = 10
+    ) -> str:
+        """Get remediation suggestions."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            suggestions = db.get_remediation_suggestions(year=year, month=month, limit=limit)
+            
+            if suggestions.get("error"):
+                return f"❌ Erro ao gerar sugestões: {suggestions['error']}"
+            
+            if not suggestions.get("suggestions"):
+                return f"""
+❌ **Nenhuma sugestão de remediação disponível**
+
+Período: {suggestions['period']}
+"""
+            
+            result = f"""
+🔧 **Sugestões de Remediação para Problemas de Validação**
+
+**Período:** {suggestions['period']}
+**Total de Sugestões:** {suggestions['total_suggestions']}
+
+"""
+            
+            for idx, suggestion in enumerate(suggestions["suggestions"], 1):
+                priority_emoji = {
+                    "critical": "🔴",
+                    "high": "🟠",
+                    "medium": "🟡",
+                    "low": "🟢"
+                }.get(suggestion["remediation"]["priority"], "⚪")
+                
+                severity_icon = "❌" if suggestion["severity"] == "error" else "⚠️"
+                
+                result += f"""
+{idx}. **{suggestion['code']}** {severity_icon}
+   📊 Frequência: {suggestion['frequency']}x
+   🎯 Ação: {suggestion['remediation']['action']}
+   {priority_emoji} Prioridade: {suggestion['remediation']['priority'].upper()}
+   📌 Exemplo: {suggestion['sample_message'][:80]}...
+   
+   **Passos para Corrigir:**
+"""
+                for step_idx, step in enumerate(suggestion["remediation"]["steps"], 1):
+                    result += f"      {step_idx}. {step}\n"
+                
+                result += "\n"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting remediation suggestions: {e}")
+            return f"❌ Erro ao gerar sugestões de remediação: {str(e)}"
+
+    async def _arun(
+        self, 
+        year: Optional[int] = None, 
+        month: Optional[int] = None,
+        limit: int = 10
+    ) -> str:
+        """Async version."""
+        return self._run(year=year, month=month, limit=limit)
+
+
+class TrendsAnalysisInput(BaseModel):
+    """Input schema for trends analysis."""
+    
+    months_back: int = Field(default=12, description="Number of months to analyze (default 12)")
+    
+    class Config:
+        """Pydantic config."""
+        str_strip_whitespace = True
+
+
+class TrendsTool(RobustBaseTool):
+    """Tool for analyzing validation issue trends over time."""
+
+    name: str = "analyze_validation_trends"
+    description: str = """
+    Analyze trends in validation issues over time (monthly aggregation).
+    
+    Use this when user asks:
+    - "Os erros estão aumentando ou diminuindo?"
+    - "Qual é a tendência de qualidade?"
+    - "Análise de tendências de problemas"
+    - "Evolução da qualidade dos documentos"
+    - "Problemas estão melhorando?"
+    
+    You can optionally specify number of months to analyze (default 12).
+    
+    Returns: Monthly aggregation of errors/warnings with trend direction.
+    """
+    args_schema: type[BaseModel] = TrendsAnalysisInput
+
+    def _run(self, months_back: int = 12) -> str:
+        """Analyze trends."""
+        try:
+            db = DatabaseManager("sqlite:///fiscal_documents.db")
+            trends = db.analyze_trends(months_back=months_back)
+            
+            if trends.get("error"):
+                return f"❌ Erro ao analisar tendências: {trends['error']}"
+            
+            if trends["data_points"] == 0:
+                return f"""
+❌ **Dados insuficientes para análise de tendências**
+
+Meses analisados: {months_back}
+"""
+            
+            result = f"""
+📈 **Análise de Tendências de Problemas de Validação**
+
+**Período:** {trends['first_period']} até {trends['last_period']}
+**Meses Analisados:** {trends['months_analyzed']}
+**Pontos de Dados:** {trends['data_points']}
+
+{trends['trend_direction']}
+
+📊 **Taxa Média de Erro:** {trends['average_error_rate']}%
+
+**Dados Mensais:**
+
+"""
+            
+            for month_data in trends["monthly_data"]:
+                # Visual bar representation
+                error_bar = "█" * int(month_data["error_rate"] / 2)
+                
+                result += f"""
+**{month_data['period']}**
+   📄 Documentos: {month_data['documents']}
+   🔴 Erros: {month_data['errors']}
+   🟡 Avisos: {month_data['warnings']}
+   📊 Taxa de Erro: {month_data['error_rate']}% {error_bar}
+"""
+            
+            # Analysis
+            if trends["data_points"] >= 2:
+                first = trends["monthly_data"][0]
+                last = trends["monthly_data"][-1]
+                
+                change = last["error_rate"] - first["error_rate"]
+                pct_change = (change / first["error_rate"] * 100) if first["error_rate"] > 0 else 0
+                
+                result += f"""
+**📊 Análise:**
+   Primeira medição: {first['period']} ({first['error_rate']}%)
+   Última medição: {last['period']} ({last['error_rate']}%)
+   Mudança: {change:+.2f}pp ({pct_change:+.1f}%)
+"""
+                
+                if change < -0.5:
+                    result += "   ✅ **POSITIVO**: Qualidade está melhorando!\n"
+                elif change > 0.5:
+                    result += "   ⚠️ **NEGATIVO**: Qualidade está piorando. Investigar!\n"
+                else:
+                    result += "   ➡️ **ESTÁVEL**: Qualidade mantém-se consistente.\n"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing trends: {e}")
+            return f"❌ Erro ao analisar tendências: {str(e)}"
+
+    async def _arun(self, months_back: int = 12) -> str:
+        """Async version."""
+        return self._run(months_back=months_back)
 
 
 # Tool instances
@@ -462,6 +1231,12 @@ validate_invoice_tool = ValidateInvoiceTool()
 fiscal_knowledge_tool = FiscalKnowledgeTool()
 database_search_tool = DatabaseSearchTool()
 database_stats_tool = DatabaseStatsTool()
+validation_analysis_tool = ValidationAnalysisTool()
+issuer_analysis_tool = IssuerAnalysisTool()
+operation_analysis_tool = OperationAnalysisTool()
+data_quality_tool = DataQualityTool()
+remediation_tool = RemediationTool()
+trends_tool = TrendsTool()
 
 # Import business tools
 from src.agent.business_tools import ALL_BUSINESS_TOOLS
@@ -471,6 +1246,9 @@ from src.agent.archiver_tools import ALL_ARCHIVER_TOOLS
 from .report_tool import FiscalReportExportTool
 fiscal_report_export_tool = FiscalReportExportTool()
 
+# Import chart export tool
+from .chart_export_tool import chart_export_tool
+
 # All tools list
 ALL_TOOLS = [
     parse_xml_tool,
@@ -478,9 +1256,17 @@ ALL_TOOLS = [
     fiscal_knowledge_tool,
     database_search_tool,
     database_stats_tool,
-    fiscal_report_export_tool,  # CSV/XLSX file export for download
-    *ALL_BUSINESS_TOOLS,  # Includes 'generate_report' for interactive charts
+    validation_analysis_tool,           # New: analyze common validation issues
+    issuer_analysis_tool,               # New: SPRINT 1 - analyze by issuer
+    operation_analysis_tool,            # New: SPRINT 1 - compare by operation type
+    data_quality_tool,                  # New: SPRINT 1 - overall quality metrics
+    remediation_tool,                   # New: SPRINT 1 - remediation suggestions
+    trends_tool,                        # New: SPRINT 1 - trend analysis
+    fiscal_report_export_tool,          # CSV/XLSX file export for download
+    chart_export_tool,                  # NEW: Export charts to CSV/XML/HTML/PNG
+    *ALL_BUSINESS_TOOLS,                # Includes 'generate_report' for interactive charts
     *ALL_ARCHIVER_TOOLS,
 ]
+
 
 

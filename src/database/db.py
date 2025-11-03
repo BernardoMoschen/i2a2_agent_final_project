@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from sqlalchemy import Index, create_engine, event
+from sqlalchemy import Index, create_engine, event, func, case, extract
 from sqlalchemy import text
 from sqlalchemy.orm import selectinload
 from sqlmodel import Field, Relationship, Session, SQLModel, select
@@ -851,8 +851,6 @@ class DatabaseManager:
         q: Optional[str] = None,
     ) -> int:
         """Return total count for given filters (used for pagination)."""
-        from sqlalchemy import func
-
         with Session(self.engine) as session:
             statement = select(func.count()).select_from(InvoiceDB)
 
@@ -909,15 +907,55 @@ class DatabaseManager:
 
             return session.exec(statement).one()
 
-    def get_statistics(self) -> dict:
-        """Get database statistics."""
+    def get_statistics(self, year: Optional[int] = None, month: Optional[int] = None) -> dict:
+        """Get database statistics, optionally filtered by year/month."""
+        from datetime import datetime as dt_module
+        
         with Session(self.engine) as session:
-            total_invoices = len(session.exec(select(InvoiceDB)).all())
-            total_items = len(session.exec(select(InvoiceItemDB)).all())
-            total_issues = len(session.exec(select(ValidationIssueDB)).all())
+            query = select(InvoiceDB)
+            
+            # Apply year/month filters if provided
+            if year:
+                start_date = dt_module(year, month if month else 1, 1)
+                if month:
+                    # For specific month, go to the last day of that month
+                    if month == 12:
+                        end_date = dt_module(year + 1, 1, 1)
+                    else:
+                        end_date = dt_module(year, month + 1, 1)
+                else:
+                    # For whole year
+                    end_date = dt_module(year + 1, 1, 1)
+                
+                query = query.where(
+                    (InvoiceDB.issue_date >= start_date) &
+                    (InvoiceDB.issue_date < end_date)
+                )
+            
+            invoices = session.exec(query).all()
+            total_invoices = len(invoices)
+            
+            # Get items for these invoices
+            if invoices:
+                invoice_ids = [inv.id for inv in invoices]
+                items_query = select(InvoiceItemDB).where(InvoiceItemDB.invoice_id.in_(invoice_ids))
+                items = session.exec(items_query).all()
+            else:
+                items = []
+            
+            total_items = len(items)
+            
+            # Get issues for these invoices
+            if invoices:
+                invoice_ids = [inv.id for inv in invoices]
+                issues_query = select(ValidationIssueDB).where(ValidationIssueDB.invoice_id.in_(invoice_ids))
+                issues = session.exec(issues_query).all()
+            else:
+                issues = []
+            
+            total_issues = len(issues)
             
             # Get totals by document type
-            invoices = session.exec(select(InvoiceDB)).all()
             by_type = {}
             total_value = Decimal("0")
             
@@ -932,6 +970,7 @@ class DatabaseManager:
                 "by_type": by_type,
                 "total_value": float(total_value),
             }
+
 
     def delete_invoice(self, document_key: str) -> bool:
         """Delete invoice by document key."""
@@ -1072,3 +1111,669 @@ class DatabaseManager:
                 return True
             
             return False
+
+    def get_validation_issue_analysis(
+        self,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+        limit: int = 10,
+    ) -> dict:
+        """
+        Analyze validation issues to find the most common problems.
+        
+        Args:
+            year: Filter by year (e.g., 2024)
+            month: Filter by month (1-12), requires year to be set
+            limit: Maximum number of top issues to return
+            
+        Returns:
+            Dictionary with analysis of common validation issues
+        """
+        with Session(self.engine) as session:
+            # Build query for validation issues
+            query = select(
+                ValidationIssueDB.code,
+                ValidationIssueDB.severity,
+            ).join(InvoiceDB)
+            
+            # Filter by date range if year/month provided
+            if year is not None:
+                start_date = datetime(year, month or 1, 1, tzinfo=UTC)
+                if month is not None:
+                    # Last day of the month
+                    next_month = datetime(
+                        year,
+                        month + 1 if month < 12 else 1,
+                        1,
+                        tzinfo=UTC
+                    ) - timedelta(days=1)
+                    end_date = next_month.replace(hour=23, minute=59, second=59)
+                else:
+                    # Entire year
+                    end_date = datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC)
+                
+                query = query.where(
+                    InvoiceDB.issue_date >= start_date,
+                    InvoiceDB.issue_date <= end_date,
+                )
+            
+            issues = session.exec(query).all()
+            
+            if not issues:
+                return {
+                    "period": f"{year}/{month}" if month else str(year) if year else "all time",
+                    "total_issues": 0,
+                    "common_issues": [],
+                    "by_severity": {},
+                }
+            
+            # Count issues by code and severity
+            issue_counts: dict[str, dict] = {}
+            severity_counts: dict[str, int] = {}
+            
+            for code, severity in issues:
+                # Count by issue code
+                if code not in issue_counts:
+                    issue_counts[code] = {
+                        "count": 0,
+                        "severity": severity,
+                        "severities": {}
+                    }
+                issue_counts[code]["count"] += 1
+                
+                # Track severity distribution for this code
+                if severity not in issue_counts[code]["severities"]:
+                    issue_counts[code]["severities"][severity] = 0
+                issue_counts[code]["severities"][severity] += 1
+                
+                # Count by severity
+                severity_counts[severity] = severity_counts.get(severity, 0) + 1
+            
+            # Sort by frequency
+            sorted_issues = sorted(
+                issue_counts.items(),
+                key=lambda x: x[1]["count"],
+                reverse=True
+            )[:limit]
+            
+            # Get descriptions for issue codes (from database if available)
+            common_issues = []
+            for code, data in sorted_issues:
+                # Try to get a sample message
+                sample_query = (
+                    select(ValidationIssueDB.message, ValidationIssueDB.field)
+                    .where(ValidationIssueDB.code == code)
+                    .limit(1)
+                )
+                sample = session.exec(sample_query).first()
+                
+                common_issues.append({
+                    "code": code,
+                    "count": data["count"],
+                    "severity": data["severity"],
+                    "severity_breakdown": data["severities"],
+                    "sample_message": sample[0] if sample else None,
+                    "field": sample[1] if sample else None,
+                })
+            
+            period_str = f"{year}/{month:02d}" if month else str(year) if year else "all time"
+            
+            return {
+                "period": period_str,
+                "total_issues": len(issues),
+                "common_issues": common_issues,
+                "by_severity": severity_counts,
+            }
+
+    def get_validation_issues_by_issuer(
+        self,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+        limit: int = 20,
+    ) -> dict:
+        """
+        Analyze validation issues grouped by issuer/emitente.
+        
+        Args:
+            year: Filter by year (e.g., 2024)
+            month: Filter by month (1-12), requires year
+            limit: Maximum number of issuers to return
+            
+        Returns:
+            Dictionary with analysis per issuer
+        """
+        with Session(self.engine) as session:
+            # Build base query
+            query = (
+                select(
+                    InvoiceDB.issuer_cnpj,
+                    InvoiceDB.issuer_name,
+                    InvoiceDB.id.label("invoice_id"),
+                    ValidationIssueDB.code,
+                    ValidationIssueDB.severity,
+                )
+                .outerjoin(ValidationIssueDB)
+            )
+            
+            # Filter by date range if specified
+            if year is not None:
+                start_date = datetime(year, month or 1, 1, tzinfo=UTC)
+                if month is not None:
+                    next_month = datetime(
+                        year,
+                        month + 1 if month < 12 else 1,
+                        1,
+                        tzinfo=UTC
+                    )
+                    end_date = next_month - timedelta(days=1)
+                else:
+                    end_date = datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC)
+                
+                query = query.where(
+                    InvoiceDB.issue_date >= start_date,
+                    InvoiceDB.issue_date <= end_date,
+                )
+            
+            results = session.exec(query).all()
+            
+            if not results:
+                return {}
+            
+            # Aggregate by issuer
+            issuer_data = {}
+            
+            for cnpj, name, invoice_id, code, severity in results:
+                if cnpj not in issuer_data:
+                    issuer_data[cnpj] = {
+                        "name": name,
+                        "invoices": set(),
+                        "errors": 0,
+                        "warnings": 0,
+                        "issues": {}
+                    }
+                
+                if invoice_id:
+                    issuer_data[cnpj]["invoices"].add(invoice_id)
+                
+                if code:
+                    if severity == "error":
+                        issuer_data[cnpj]["errors"] += 1
+                    elif severity == "warning":
+                        issuer_data[cnpj]["warnings"] += 1
+                    
+                    if code not in issuer_data[cnpj]["issues"]:
+                        issuer_data[cnpj]["issues"][code] = 0
+                    issuer_data[cnpj]["issues"][code] += 1
+            
+            # Convert to list and sort by error rate
+            issuer_list = []
+            for cnpj, data in issuer_data.items():
+                invoice_count = len(data["invoices"])
+                total_issues = data["errors"] + data["warnings"]
+                error_rate = (data["errors"] / invoice_count * 100) if invoice_count > 0 else 0
+                
+                top_issues = sorted(
+                    data["issues"].items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:3]
+                
+                issuer_list.append({
+                    "cnpj": cnpj,
+                    "name": data["name"],
+                    "document_count": invoice_count,
+                    "error_count": data["errors"],
+                    "warning_count": data["warnings"],
+                    "total_issues": total_issues,
+                    "error_rate": round(error_rate, 2),
+                    "top_issues": [{"code": code, "count": cnt} for code, cnt in top_issues],
+                })
+            
+            # Sort by error rate descending
+            issuer_list.sort(key=lambda x: x["error_rate"], reverse=True)
+            
+            return {
+                "period": f"{year}/{month:02d}" if month else str(year) if year else "all time",
+                "total_issuers": len(issuer_list),
+                "issuers": issuer_list[:limit]
+            }
+
+    def get_validation_issues_by_operation(
+        self,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ) -> dict:
+        """
+        Compare validation issues across different operation types.
+        
+        Args:
+            year: Filter by year
+            month: Filter by month
+            
+        Returns:
+            Dictionary with analysis by operation type
+        """
+        with Session(self.engine) as session:
+            query = select(
+                InvoiceDB.operation_type,
+                InvoiceDB.id.label("invoice_id"),
+                ValidationIssueDB.code,
+                ValidationIssueDB.severity,
+            ).outerjoin(ValidationIssueDB)
+            
+            # Filter by date
+            if year is not None:
+                start_date = datetime(year, month or 1, 1, tzinfo=UTC)
+                if month is not None:
+                    next_month = datetime(year, month + 1 if month < 12 else 1, 1, tzinfo=UTC)
+                    end_date = next_month - timedelta(days=1)
+                else:
+                    end_date = datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC)
+                
+                query = query.where(
+                    InvoiceDB.issue_date >= start_date,
+                    InvoiceDB.issue_date <= end_date,
+                )
+            
+            results = session.exec(query).all()
+            
+            # Aggregate by operation
+            op_data = {}
+            
+            for operation, invoice_id, code, severity in results:
+                op_type = operation or "unclassified"
+                
+                if op_type not in op_data:
+                    op_data[op_type] = {
+                        "invoices": set(),
+                        "errors": 0,
+                        "warnings": 0,
+                    }
+                
+                if invoice_id:
+                    op_data[op_type]["invoices"].add(invoice_id)
+                
+                if code:
+                    if severity == "error":
+                        op_data[op_type]["errors"] += 1
+                    elif severity == "warning":
+                        op_data[op_type]["warnings"] += 1
+            
+            # Format response
+            result = {}
+            for op_type, data in op_data.items():
+                count = len(data["invoices"])
+                total_issues = data["errors"] + data["warnings"]
+                result[op_type] = {
+                    "document_count": count,
+                    "error_count": data["errors"],
+                    "warning_count": data["warnings"],
+                    "total_issues": total_issues,
+                    "avg_issues_per_doc": round(total_issues / count, 2) if count > 0 else 0,
+                    "error_rate": round((data["errors"] / count * 100), 2) if count > 0 else 0,
+                }
+            
+            return {
+                "period": f"{year}/{month:02d}" if month else str(year) if year else "all time",
+                "by_operation": result
+            }
+
+    def calculate_data_quality_score(
+        self,
+        year: Optional[int] = None,
+    ) -> dict:
+        """
+        Calculate overall data quality metrics (0-100 scale).
+        
+        Args:
+            year: Filter by year, if None uses all data
+            
+        Returns:
+            Dictionary with quality metrics
+        """
+        with Session(self.engine) as session:
+            # Base query
+            query = select(
+                InvoiceDB.id,
+                InvoiceDB.issue_date,
+            )
+            
+            if year:
+                start_date = datetime(year, 1, 1, tzinfo=UTC)
+                end_date = datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC)
+                query = query.where(
+                    InvoiceDB.issue_date >= start_date,
+                    InvoiceDB.issue_date <= end_date,
+                )
+            
+            invoices = session.exec(query).all()
+            
+            if not invoices:
+                return {
+                    "overall_score": 0,
+                    "documents_analyzed": 0,
+                    "metrics": {}
+                }
+            
+            invoice_ids = [inv[0] for inv in invoices]
+            
+            # Count issues
+            issues_query = select(
+                func.count().label("total"),
+                func.sum(case((ValidationIssueDB.severity == "error", 1), else_=0)).label("errors"),
+                func.sum(case((ValidationIssueDB.severity == "warning", 1), else_=0)).label("warnings"),
+            ).where(ValidationIssueDB.invoice_id.in_(invoice_ids))
+            
+            total_issues, error_count, warning_count = session.exec(issues_query).one()
+            
+            total_issues = total_issues or 0
+            error_count = error_count or 0
+            warning_count = warning_count or 0
+            
+            doc_count = len(invoice_ids)
+            
+            # Calculate metrics
+            docs_with_errors = min(doc_count, len(set(
+                session.exec(
+                    select(ValidationIssueDB.invoice_id).where(
+                        (ValidationIssueDB.invoice_id.in_(invoice_ids)) &
+                        (ValidationIssueDB.severity == "error")
+                    ).distinct()
+                ).all()
+            )))
+            
+            docs_with_warnings = min(doc_count, len(set(
+                session.exec(
+                    select(ValidationIssueDB.invoice_id).where(
+                        (ValidationIssueDB.invoice_id.in_(invoice_ids)) &
+                        (ValidationIssueDB.severity == "warning")
+                    ).distinct()
+                ).all()
+            )))
+            
+            # Score calculation
+            completeness = 100  # All docs present
+            accuracy = max(0, 100 - (error_count / max(1, doc_count) * 50))
+            consistency = max(0, 100 - (warning_count / max(1, doc_count) * 30))
+            
+            overall_score = (completeness + accuracy + consistency) / 3
+            
+            return {
+                "overall_score": round(overall_score, 1),
+                "documents_analyzed": doc_count,
+                "documents_with_errors": docs_with_errors,
+                "documents_with_warnings": docs_with_warnings,
+                "documents_clean": doc_count - docs_with_errors - docs_with_warnings,
+                "total_issues": total_issues,
+                "error_count": error_count,
+                "warning_count": warning_count,
+                "metrics": {
+                    "completeness": round(completeness, 1),
+                    "accuracy": round(accuracy, 1),
+                    "consistency": round(consistency, 1),
+                },
+                "error_rate": round((error_count / doc_count * 100), 2) if doc_count > 0 else 0,
+                "warning_rate": round((warning_count / doc_count * 100), 2) if doc_count > 0 else 0,
+            }
+
+    def get_remediation_suggestions(self, year: Optional[int] = None, month: Optional[int] = None, limit: int = 10) -> dict:  # pragma: no cover
+        """
+        Get remediation suggestions for most common validation issues.
+        
+        Maps error codes to recommended actions and provides a prioritized list
+        of fixes based on frequency and impact.
+        
+        Args:
+            year: Optional filter by year
+            month: Optional filter by month
+            limit: Max number of suggestions to return (default 10)
+            
+        Returns:
+            Dictionary with suggestions sorted by impact (frequency * severity weight)
+        """
+        try:
+            with Session(self.engine) as session:
+                # Get all validation issues with filters
+                query = select(ValidationIssueDB).join(InvoiceDB)
+                
+                if year is not None:
+                    start_date = datetime(year, month or 1, 1)
+                    if month is not None:
+                        next_month = datetime(
+                            year,
+                            month + 1 if month < 12 else 1,
+                            1,
+                        ) - timedelta(days=1)
+                        end_date = next_month.replace(hour=23, minute=59, second=59)
+                    else:
+                        end_date = datetime(year, 12, 31, 23, 59, 59)
+                    
+                    query = query.where(
+                        (InvoiceDB.issue_date >= start_date) & (InvoiceDB.issue_date <= end_date)
+                    )
+                
+                issues_db = session.exec(query).all()
+                
+                # Aggregate by code/severity/message
+                issue_counts: dict = {}
+                for issue in issues_db:
+                    key = (issue.code, issue.severity, issue.message)
+                    issue_counts[key] = issue_counts.get(key, 0) + 1
+                
+                # Sort by frequency
+                sorted_issues = sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+                issues = [(code, severity, msg, count) for (code, severity, msg), count in sorted_issues]
+            
+            # Map error codes to remediation actions
+            REMEDIATION_MAP = {
+                # Tax issues
+                "INVALID_TAX_RATE": {
+                    "action": "Verify tax calculation",
+                    "steps": ["Check ICMS/IPI/PIS rates", "Validate against state and federal rules", "Review CST code"],
+                    "priority": "high"
+                },
+                "TAX_MISMATCH": {
+                    "action": "Reconcile declared vs calculated taxes",
+                    "steps": ["Recalculate taxes from items", "Check rounding rules", "Verify tax base"],
+                    "priority": "high"
+                },
+                "TOTAL_MISMATCH": {
+                    "action": "Reconcile invoice totals",
+                    "steps": ["Sum all item values", "Add taxes correctly", "Check for deductions"],
+                    "priority": "critical"
+                },
+                # Classification issues
+                "INVALID_CFOP": {
+                    "action": "Correct CFOP code",
+                    "steps": ["Verify operation type", "Check CFOP validity for state", "Review fiscal situation"],
+                    "priority": "high"
+                },
+                "INVALID_OPERATION_TYPE": {
+                    "action": "Set correct operation type",
+                    "steps": ["Identify if purchase/sale/transfer", "Classify correctly in system"],
+                    "priority": "high"
+                },
+                # Item/product issues
+                "INVALID_NCM": {
+                    "action": "Validate NCM code",
+                    "steps": ["Check NCM format (8 digits)", "Verify product classification", "Update product catalog"],
+                    "priority": "medium"
+                },
+                "MISSING_ITEM_DATA": {
+                    "action": "Complete item information",
+                    "steps": ["Add product code", "Include quantity/unit", "Provide unit price"],
+                    "priority": "high"
+                },
+                # CNPJ/document issues
+                "INVALID_CNPJ": {
+                    "action": "Fix CNPJ format",
+                    "steps": ["Validate CNPJ syntax", "Check digit verification", "Update company data"],
+                    "priority": "critical"
+                },
+                "INVALID_IE": {
+                    "action": "Fix State Registration",
+                    "steps": ["Verify IE format", "Check state rules", "Update company data"],
+                    "priority": "medium"
+                },
+                # Quantity/value issues
+                "QUANTITY_UNIT_MISMATCH": {
+                    "action": "Fix quantity and unit",
+                    "steps": ["Verify item quantity", "Check unit of measure", "Recalculate total"],
+                    "priority": "medium"
+                },
+                "VALUE_PRECISION_ERROR": {
+                    "action": "Fix value precision",
+                    "steps": ["Use correct decimal places", "Apply rounding rules", "Recalculate totals"],
+                    "priority": "medium"
+                },
+            }
+            
+            suggestions = []
+            for code, severity, message, frequency in issues:
+                # Calculate impact score (frequency * severity weight)
+                severity_weight = {"error": 3, "warning": 1}.get(severity, 1)
+                impact = frequency * severity_weight
+                
+                # Get remediation or use generic
+                remedy = REMEDIATION_MAP.get(code, {
+                    "action": f"Investigate {code}",
+                    "steps": ["Review error message", "Consult documentation", "Contact support if needed"],
+                    "priority": "low"
+                })
+                
+                suggestions.append({
+                    "code": code,
+                    "frequency": frequency,
+                    "severity": severity,
+                    "impact_score": impact,
+                    "sample_message": message,
+                    "remediation": {
+                        "action": remedy["action"],
+                        "steps": remedy["steps"],
+                        "priority": remedy["priority"]
+                    }
+                })
+            
+            # Sort by impact
+            suggestions.sort(key=lambda x: x["impact_score"], reverse=True)
+            
+            period = f"{year}-{month:02d}" if year and month else f"{year}" if year else "all time"
+            
+            return {
+                "period": period,
+                "total_suggestions": len(suggestions),
+                "suggestions": suggestions
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating remediation suggestions: {e}")
+            return {"period": "unknown", "total_suggestions": 0, "suggestions": [], "error": str(e)}
+
+    def analyze_trends(self, months_back: int = 12) -> dict:  # pragma: no cover
+        """
+        Analyze validation issue trends over time.
+        
+        Shows monthly aggregation of errors/warnings and trend direction
+        (increasing/decreasing/stable).
+        
+        Args:
+            months_back: Number of months to analyze (default 12)
+            
+        Returns:
+            Dictionary with monthly trends and aggregate statistics
+        """
+        try:
+            # Calculate start date (no timezone issues)
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30 * months_back)
+            
+            with Session(self.engine) as session:
+                # Get invoices in the period with their validation issues
+                query = select(InvoiceDB).where(InvoiceDB.issue_date >= start_date)
+                invoices = session.exec(query).all()
+                
+                # Aggregate by month
+                monthly_data: dict = {}
+                
+                for invoice in invoices:
+                    year = invoice.issue_date.year
+                    month = invoice.issue_date.month
+                    period_key = f"{year}-{month:02d}"
+                    
+                    if period_key not in monthly_data:
+                        monthly_data[period_key] = {
+                            "year": year,
+                            "month": month,
+                            "document_count": 0,
+                            "error_count": 0,
+                            "warning_count": 0,
+                        }
+                    
+                    monthly_data[period_key]["document_count"] += 1
+                    
+                    # Count issues for this invoice
+                    issue_query = select(ValidationIssueDB).where(
+                        ValidationIssueDB.invoice_id == invoice.id
+                    )
+                    issues = session.exec(issue_query).all()
+                    
+                    for issue in issues:
+                        if issue.severity == "error":
+                            monthly_data[period_key]["error_count"] += 1
+                        elif issue.severity == "warning":
+                            monthly_data[period_key]["warning_count"] += 1
+                
+                # Convert to list and sort
+                trends = []
+                for period_key in sorted(monthly_data.keys()):
+                    data = monthly_data[period_key]
+                    doc_count = data["document_count"]
+                    if doc_count == 0:
+                        continue
+                    
+                    error_rate = (data["error_count"] / doc_count * 100) if doc_count > 0 else 0
+                    warning_rate = (data["warning_count"] / doc_count * 100) if doc_count > 0 else 0
+                    
+                    trends.append({
+                        "period": period_key,
+                        "documents": doc_count,
+                        "errors": data["error_count"],
+                        "warnings": data["warning_count"],
+                        "error_rate": round(error_rate, 2),
+                        "warning_rate": round(warning_rate, 2),
+                        "total_issues": data["error_count"] + data["warning_count"]
+                    })
+            
+            # Analyze trend direction
+            if len(trends) >= 2:
+                # Compare first and last
+                first_error_rate = trends[0]["error_rate"]
+                last_error_rate = trends[-1]["error_rate"]
+                
+                if last_error_rate > first_error_rate * 1.1:  # 10% increase
+                    trend_direction = "📈 INCREASING (Quality Degrading)"
+                elif last_error_rate < first_error_rate * 0.9:  # 10% decrease
+                    trend_direction = "📉 DECREASING (Quality Improving)"
+                else:
+                    trend_direction = "➡️ STABLE"
+                
+                # Calculate average rate for the period
+                avg_error_rate = sum(t["error_rate"] for t in trends) / len(trends)
+            else:
+                trend_direction = "📊 INSUFFICIENT DATA"
+                avg_error_rate = trends[0]["error_rate"] if trends else 0
+            
+            return {
+                "months_analyzed": months_back,
+                "data_points": len(trends),
+                "trend_direction": trend_direction,
+                "average_error_rate": round(avg_error_rate, 2),
+                "first_period": trends[0]["period"] if trends else None,
+                "last_period": trends[-1]["period"] if trends else None,
+                "monthly_data": trends
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing trends: {e}")
+            return {"months_analyzed": months_back, "data_points": 0, "monthly_data": [], "error": str(e)}
+

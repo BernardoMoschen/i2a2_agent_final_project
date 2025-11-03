@@ -103,6 +103,59 @@ class ReportGenerator:
         self.output_dir = Path("reports")
         self.output_dir.mkdir(exist_ok=True)
 
+    def get_report_data(
+        self,
+        report_type: str,
+        filters: Optional[ReportFilters] = None,
+    ) -> Optional[pd.DataFrame]:
+        """Get report data as DataFrame without saving to file.
+        
+        Useful for generating in-memory charts without disk I/O.
+        
+        Args:
+            report_type: Type of report to generate
+            filters: Optional filters for report data
+            
+        Returns:
+            DataFrame with report data or None if error
+        """
+        try:
+            report_methods = {
+                ReportType.DOCUMENTS_WITH_ISSUES: self._report_documents_with_issues,
+                ReportType.DOCUMENTS_WITHOUT_ISSUES: self._report_documents_without_issues,
+                ReportType.ISSUES_BY_TYPE: self._report_issues_by_type,
+                ReportType.ISSUES_BY_ISSUER: self._report_issues_by_issuer,
+                ReportType.ISSUES_BY_SEVERITY: self._report_issues_by_severity,
+                ReportType.TAXES_BY_PERIOD: self._report_taxes_by_period,
+                ReportType.TOTAL_VALUE_BY_PERIOD: self._report_total_value_by_period,
+                ReportType.TOP_SUPPLIERS_BY_VALUE: self._report_top_suppliers,
+                ReportType.COSTS_BY_CENTER: self._report_costs_by_center,
+                ReportType.DOCUMENTS_BY_OPERATION_TYPE: self._report_by_operation_type,
+                ReportType.DOCUMENTS_BY_DOCUMENT_TYPE: self._report_by_document_type,
+                ReportType.VOLUME_BY_PERIOD: self._report_volume_by_period,
+                ReportType.CACHE_EFFECTIVENESS: self._report_cache_effectiveness,
+                ReportType.UNCLASSIFIED_DOCUMENTS: self._report_unclassified,
+                ReportType.CLASSIFICATION_BY_COST_CENTER: self._report_by_cost_center,
+                ReportType.LLM_FALLBACK_USAGE: self._report_llm_fallback,
+                ReportType.TOP_PRODUCTS_BY_NCM: self._report_top_products,
+                ReportType.ANALYSIS_BY_CFOP: self._report_by_cfop,
+                ReportType.ITEMS_WITH_ISSUES: self._report_items_with_issues,
+            }
+            
+            if report_type not in report_methods:
+                logger.error(f"Unknown report type: {report_type}")
+                return None
+            
+            if filters is None:
+                filters = ReportFilters()
+            
+            df, _ = report_methods[report_type](filters)
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error getting report data: {e}", exc_info=True)
+            return None
+
     def generate_report(
         self,
         report_type: str,
@@ -960,6 +1013,127 @@ class ReportGenerator:
             
         except Exception as e:
             logger.warning(f"Failed to generate chart: {e}")
+            return None
+
+    def _generate_plotly_chart(
+        self, df: pd.DataFrame, report_type: str
+    ) -> Optional[Dict[str, Any]]:
+        """Generate a Plotly chart (JSON) for Cloud-compatible rendering.
+        
+        Cloud-compatible alternative to PNG file-based charts.
+        Returns Plotly figure dict that can be rendered with st.plotly_chart().
+        
+        Args:
+            df: DataFrame with report data
+            report_type: Type of report
+            
+        Returns:
+            Plotly figure dict or None
+        """
+        try:
+            import plotly.graph_objects as go
+            import plotly.express as px
+            
+            if df.empty:
+                return None
+            
+            # Different chart types based on report
+            if report_type in [ReportType.ISSUES_BY_TYPE, ReportType.ISSUES_BY_SEVERITY]:
+                if "Issue Code" in df.columns:
+                    fig = px.bar(
+                        df.head(10),
+                        x="Issue Code",
+                        y="Occurrences",
+                        title=report_type.replace("_", " ").title(),
+                        labels={"Issue Code": "Issue Code", "Occurrences": "Count"}
+                    )
+                elif "Severity" in df.columns:
+                    fig = px.bar(
+                        df,
+                        x="Severity",
+                        y="Count",
+                        title=report_type.replace("_", " ").title()
+                    )
+                else:
+                    return None
+                    
+            elif report_type in [ReportType.DOCUMENTS_BY_OPERATION_TYPE, ReportType.DOCUMENTS_BY_DOCUMENT_TYPE]:
+                if "Operation Type" in df.columns:
+                    fig = px.bar(
+                        df,
+                        x="Operation Type",
+                        y="Document Count",
+                        title=report_type.replace("_", " ").title()
+                    )
+                elif "Document Type" in df.columns:
+                    fig = px.bar(
+                        df,
+                        x="Document Type",
+                        y="Count",
+                        title=report_type.replace("_", " ").title()
+                    )
+                else:
+                    return None
+                    
+            elif report_type == ReportType.VOLUME_BY_PERIOD:
+                fig = px.line(
+                    df,
+                    x="Period",
+                    y="Document Count",
+                    title=report_type.replace("_", " ").title(),
+                    markers=True
+                )
+                
+            elif report_type == ReportType.TOTAL_VALUE_BY_PERIOD:
+                fig = px.line(
+                    df,
+                    x="Period",
+                    y="Total Invoice",
+                    title=report_type.replace("_", " ").title(),
+                    markers=True
+                )
+                
+            elif report_type == ReportType.TOP_SUPPLIERS_BY_VALUE:
+                fig = px.bar(
+                    df.head(10),
+                    x="Total Value",
+                    y="Supplier",
+                    orientation="h",
+                    title=report_type.replace("_", " ").title()
+                )
+                
+            else:
+                # Default: first numeric column
+                numeric_cols = df.select_dtypes(include=["number"]).columns
+                if len(numeric_cols) > 0:
+                    fig = px.bar(
+                        df.head(10),
+                        y=numeric_cols[0],
+                        title=report_type.replace("_", " ").title()
+                    )
+                else:
+                    return None
+            
+            # Update layout for better appearance
+            fig.update_layout(
+                height=500,
+                margin=dict(l=50, r=50, t=50, b=50),
+                hovermode="x unified",
+                template="plotly_white"
+            )
+            
+            # Convert to JSON-serializable dict
+            import json
+            import plotly.io as pio
+            
+            # Use plotly's JSON serialization to handle numpy types
+            fig_json = pio.to_json(fig)
+            chart_dict = json.loads(fig_json)
+            
+            return chart_dict
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate Plotly chart: {e}")
             return None
 
     def _format_filters(self, filters: ReportFilters) -> Dict[str, Any]:

@@ -28,7 +28,8 @@ DATE_PRESETS = [
 
 def _filters_ui() -> Dict:
     """Render filters and return a dict for DB queries."""
-    st.subheader("🔍 Filters")
+    st.subheader("🔍 Filters", divider=True)
+    st.caption("Fast filtering, server-side pagination, selection and export")
     # Global text search (issuer/recipient names, item descriptions)
     q = st.text_input(
         "Full-text search (issuer/recipient/items)",
@@ -185,15 +186,11 @@ def _to_rows(invoices: List[InvoiceDB]) -> pd.DataFrame:
 
 
 def render_documents_explorer(db: DatabaseManager) -> None:
-    """Render the Documents explorer v2."""
-    st.header("📋 Documents Explorer v2")
-    st.caption("Fast filtering, server-side pagination, selection and export")
-
     # Filters
     filters = _filters_ui()
 
     # Pagination controls
-    st.subheader("📄 Pagination")
+    st.subheader("📄 Pagination", divider='gray')
     c1, c2, c3 = st.columns(3)
     with c1:
         page_size = st.selectbox("Per page", options=[10, 25, 50, 100], index=1, key="explorer_page_size")
@@ -208,11 +205,11 @@ def render_documents_explorer(db: DatabaseManager) -> None:
     # Export all filtered (streaming to temp file)
     exp_c1, exp_c2 = st.columns([2, 3])
     with exp_c1:
-        st.caption("Export")
+        st.caption("Export Format")
         export_disabled = total_documents == 0
         fmt = st.selectbox(
             "Format",
-            options=["CSV", "CSV (gzip)", "Parquet"],
+            options=["CSV", "CSV (gzip)", "Parquet", "Excel"],
             index=0,
             disabled=export_disabled,
             key="explorer_export_fmt",
@@ -297,6 +294,149 @@ def render_documents_explorer(db: DatabaseManager) -> None:
                         mime="application/gzip",
                         key="explorer_export_all_gz_dl",
                     )
+                elif fmt == "Excel":
+                    with st.spinner("Building Excel workbook for all filtered documents..."):
+                        # Build datasets in chunks
+                        invoices_rows = []
+                        items_rows = []
+                        batch_size = 1000
+                        for ofs in range(0, total_documents, batch_size):
+                            batch = db.search_invoices(limit=batch_size, offset=ofs, **filters)
+                            for inv in batch:
+                                total_invoice = float(inv.total_invoice) if inv.total_invoice else 0.0
+                                invoices_rows.append({
+                                    "Date": inv.issue_date.isoformat() if inv.issue_date else "",
+                                    "Type": inv.document_type or "",
+                                    "Operation": inv.operation_type or "",
+                                    "Number": inv.document_number or "",
+                                    "Issuer": inv.issuer_name or "",
+                                    "CNPJ": inv.issuer_cnpj or "",
+                                    "Recipient": inv.recipient_name or "",
+                                    "Recipient Doc": inv.recipient_cnpj_cpf or "",
+                                    "Modal": inv.modal or "",
+                                    "Cost Center": inv.cost_center or "",
+                                    "Confidence": f"{inv.classification_confidence:.2f}" if inv.classification_confidence is not None else "",
+                                    "Items": len(inv.items) if inv.items else 0,
+                                    "Total": f"{total_invoice:.2f}",
+                                    "Key": inv.document_key or "",
+                                })
+                                for it_idx, it in enumerate(inv.items or []):
+                                    items_rows.append({
+                                        "Invoice Key": inv.document_key or "",
+                                        "Item": it_idx + 1,
+                                        "Code": it.product_code or "",
+                                        "Description": it.description or "",
+                                        "NCM": it.ncm or "",
+                                        "CFOP": it.cfop or "",
+                                        "Unit": it.unit or "",
+                                        "Quantity": float(it.quantity) if it.quantity else 0.0,
+                                        "Unit Price": float(it.unit_price) if it.unit_price else 0.0,
+                                        "Total Price": float(it.total_price) if it.total_price else 0.0,
+                                        "ICMS": float(it.tax_icms) if it.tax_icms else 0.0,
+                                        "IPI": float(it.tax_ipi) if it.tax_ipi else 0.0,
+                                        "PIS": float(it.tax_pis) if it.tax_pis else 0.0,
+                                        "COFINS": float(it.tax_cofins) if it.tax_cofins else 0.0,
+                                        "ISSQN": float(it.tax_issqn) if it.tax_issqn else 0.0,
+                                    })
+
+                        inv_df = pd.DataFrame(invoices_rows)
+                        items_df = pd.DataFrame(items_rows)
+
+                        # Write to Excel with formatting
+                        import io as _io
+                        buffer = _io.BytesIO()
+                        
+                        # Try xlsxwriter first (richer formatting), fallback to openpyxl
+                        engine = "openpyxl"  # Default fallback
+                        try:
+                            import xlsxwriter as _xlsxwriter
+                            engine = "xlsxwriter"
+                        except ImportError:
+                            pass
+                        
+                        with pd.ExcelWriter(buffer, engine=engine) as writer:
+                            inv_df.to_excel(writer, index=False, sheet_name="Invoices")
+                            items_df.to_excel(writer, index=False, sheet_name="Items")
+
+                            wb = writer.book
+                            ws_inv = writer.sheets["Invoices"]
+                            ws_items = writer.sheets["Items"]
+
+                            # Only apply xlsxwriter-specific formatting if using xlsxwriter
+                            if engine == "xlsxwriter":
+                                # Formats (xlsxwriter only)
+                                header_fmt = wb.add_format({"bold": True, "bg_color": "#F2F2F2", "bottom": 1})
+                                money_fmt = wb.add_format({"num_format": "R$ #,##0.00"})
+                                num2_fmt = wb.add_format({"num_format": "0.00"})
+
+                                # Apply header format
+                                for col, _name in enumerate(inv_df.columns):
+                                    ws_inv.write(0, col, inv_df.columns[col], header_fmt)
+                                for col, _name in enumerate(items_df.columns):
+                                    ws_items.write(0, col, items_df.columns[col], header_fmt)
+
+                                # Column widths & numeric formats for Invoices
+                                inv_widths = {
+                                    "Date": 20,
+                                    "Type": 8,
+                                    "Operation": 12,
+                                    "Number": 10,
+                                    "Issuer": 28,
+                                    "CNPJ": 18,
+                                    "Recipient": 28,
+                                    "Recipient Doc": 18,
+                                    "Modal": 8,
+                                    "Cost Center": 12,
+                                    "Confidence": 12,
+                                    "Items": 8,
+                                    "Total": 14,
+                                    "Key": 40,
+                                }
+                                for i, col in enumerate(inv_df.columns):
+                                    ws_inv.set_column(i, i, inv_widths.get(col, 12))
+                                    if col == "Total":
+                                        ws_inv.set_column(i, i, inv_widths.get(col, 12), money_fmt)
+                                    if col == "Confidence":
+                                        ws_inv.set_column(i, i, inv_widths.get(col, 12), num2_fmt)
+
+                                # Column widths & numeric formats for Items
+                                items_widths = {
+                                    "Invoice Key": 40,
+                                    "Item": 6,
+                                    "Code": 14,
+                                    "Description": 40,
+                                    "NCM": 12,
+                                    "CFOP": 10,
+                                    "Unit": 8,
+                                    "Quantity": 10,
+                                    "Unit Price": 14,
+                                    "Total Price": 14,
+                                    "ICMS": 12,
+                                    "IPI": 12,
+                                    "PIS": 12,
+                                    "COFINS": 12,
+                                    "ISSQN": 12,
+                                }
+                                for i, col in enumerate(items_df.columns):
+                                    ws_items.set_column(i, i, items_widths.get(col, 12))
+                                    if col in ("Unit Price", "Total Price", "ICMS", "IPI", "PIS", "COFINS", "ISSQN"):
+                                        ws_items.set_column(i, i, items_widths.get(col, 12), money_fmt)
+                                    if col == "Quantity":
+                                        ws_items.set_column(i, i, items_widths.get(col, 12), num2_fmt)
+
+                                # Freeze headers & add filters
+                                ws_inv.freeze_panes(1, 0)
+                                ws_items.freeze_panes(1, 0)
+                                ws_inv.autofilter(0, 0, max(1, len(inv_df)), max(0, len(inv_df.columns) - 1))
+                                ws_items.autofilter(0, 0, max(1, len(items_df)), max(0, len(items_df.columns) - 1))
+
+                        st.download_button(
+                            "Download Excel (Invoices + Items)",
+                            data=buffer.getvalue(),
+                            file_name="documents_filtered_export.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="explorer_export_all_xlsx_dl",
+                        )
                 elif fmt == "Parquet":
                     try:
                         import pyarrow as pa
@@ -344,152 +484,6 @@ def render_documents_explorer(db: DatabaseManager) -> None:
                             key="explorer_export_all_parquet_dl",
                         )
 
-    with exp_c2:
-        st.caption("Export (Excel)")
-        export_disabled = total_documents == 0
-        if st.button(
-            f"⬇️ Export all filtered (Excel)",
-            disabled=export_disabled,
-            key="explorer_export_all_xlsx_btn",
-        ):
-            with st.spinner("Building Excel workbook for all filtered documents..."):
-                # Build datasets in chunks
-                invoices_rows = []
-                items_rows = []
-                batch_size = 1000
-                for ofs in range(0, total_documents, batch_size):
-                    batch = db.search_invoices(limit=batch_size, offset=ofs, **filters)
-                    for inv in batch:
-                        total_invoice = float(inv.total_invoice) if inv.total_invoice else 0.0
-                        invoices_rows.append(
-                            {
-                                "Date": inv.issue_date.isoformat() if inv.issue_date else "",
-                                "Type": inv.document_type or "",
-                                "Operation": inv.operation_type or "",
-                                "Number": inv.document_number or "",
-                                "Issuer": inv.issuer_name or "",
-                                "CNPJ": inv.issuer_cnpj or "",
-                                "Recipient": inv.recipient_name or "",
-                                "Recipient Doc": inv.recipient_cnpj_cpf or "",
-                                "Modal": inv.modal or "",
-                                "Cost Center": inv.cost_center or "",
-                                "Confidence": inv.classification_confidence if inv.classification_confidence is not None else "",
-                                "Items": len(inv.items) if inv.items else 0,
-                                "Total": total_invoice,
-                                "Key": inv.document_key or "",
-                            }
-                        )
-                        # Items for this invoice
-                        if getattr(inv, "items", None):
-                            for it in inv.items:
-                                items_rows.append(
-                                    {
-                                        "Invoice Key": inv.document_key or "",
-                                        "Item": it.item_number,
-                                        "Code": it.product_code,
-                                        "Description": it.description,
-                                        "NCM": getattr(it, "ncm", None) or "",
-                                        "CFOP": getattr(it, "cfop", None) or "",
-                                        "Unit": getattr(it, "unit", None) or "",
-                                        "Quantity": float(it.quantity) if getattr(it, "quantity", None) else 0.0,
-                                        "Unit Price": float(it.unit_price) if getattr(it, "unit_price", None) else 0.0,
-                                        "Total Price": float(it.total_price) if getattr(it, "total_price", None) else 0.0,
-                                        "ICMS": float(it.taxes.icms) if getattr(it, "taxes", None) and getattr(it.taxes, "icms", None) is not None else 0.0,
-                                        "IPI": float(it.taxes.ipi) if getattr(it, "taxes", None) and getattr(it.taxes, "ipi", None) is not None else 0.0,
-                                        "PIS": float(it.taxes.pis) if getattr(it, "taxes", None) and getattr(it.taxes, "pis", None) is not None else 0.0,
-                                        "COFINS": float(it.taxes.cofins) if getattr(it, "taxes", None) and getattr(it.taxes, "cofins", None) is not None else 0.0,
-                                        "ISSQN": float(it.taxes.issqn) if getattr(it, "taxes", None) and getattr(it.taxes, "issqn", None) is not None else 0.0,
-                                    }
-                                )
-
-                inv_df = pd.DataFrame(invoices_rows)
-                items_df = pd.DataFrame(items_rows)
-
-                # Write to Excel with formatting
-                import io as _io
-                buffer = _io.BytesIO()
-                # Prefer xlsxwriter for richer formatting; pandas will import it if installed
-                with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-                    inv_df.to_excel(writer, index=False, sheet_name="Invoices")
-                    items_df.to_excel(writer, index=False, sheet_name="Items")
-
-                    wb = writer.book
-                    ws_inv = writer.sheets["Invoices"]
-                    ws_items = writer.sheets["Items"]
-
-                    # Formats
-                    header_fmt = wb.add_format({"bold": True, "bg_color": "#F2F2F2", "bottom": 1})
-                    money_fmt = wb.add_format({"num_format": "R$ #,##0.00"})
-                    num2_fmt = wb.add_format({"num_format": "0.00"})
-
-                    # Apply header format
-                    for col, _name in enumerate(inv_df.columns):
-                        ws_inv.write(0, col, inv_df.columns[col], header_fmt)
-                    for col, _name in enumerate(items_df.columns):
-                        ws_items.write(0, col, items_df.columns[col], header_fmt)
-
-                    # Column widths & numeric formats for Invoices
-                    inv_widths = {
-                        "Date": 20,
-                        "Type": 8,
-                        "Operation": 12,
-                        "Number": 10,
-                        "Issuer": 28,
-                        "CNPJ": 18,
-                        "Recipient": 28,
-                        "Recipient Doc": 18,
-                        "Modal": 8,
-                        "Cost Center": 12,
-                        "Confidence": 12,
-                        "Items": 8,
-                        "Total": 14,
-                        "Key": 40,
-                    }
-                    for i, col in enumerate(inv_df.columns):
-                        ws_inv.set_column(i, i, inv_widths.get(col, 12))
-                        if col == "Total":
-                            ws_inv.set_column(i, i, inv_widths.get(col, 12), money_fmt)
-                        if col == "Confidence":
-                            ws_inv.set_column(i, i, inv_widths.get(col, 12), num2_fmt)
-
-                    # Column widths & numeric formats for Items
-                    items_widths = {
-                        "Invoice Key": 40,
-                        "Item": 6,
-                        "Code": 14,
-                        "Description": 40,
-                        "NCM": 12,
-                        "CFOP": 10,
-                        "Unit": 8,
-                        "Quantity": 10,
-                        "Unit Price": 14,
-                        "Total Price": 14,
-                        "ICMS": 12,
-                        "IPI": 12,
-                        "PIS": 12,
-                        "COFINS": 12,
-                        "ISSQN": 12,
-                    }
-                    for i, col in enumerate(items_df.columns):
-                        ws_items.set_column(i, i, items_widths.get(col, 12))
-                        if col in ("Unit Price", "Total Price", "ICMS", "IPI", "PIS", "COFINS", "ISSQN"):
-                            ws_items.set_column(i, i, items_widths.get(col, 12), money_fmt)
-                        if col == "Quantity":
-                            ws_items.set_column(i, i, items_widths.get(col, 12), num2_fmt)
-
-                    # Freeze headers & add filters
-                    ws_inv.freeze_panes(1, 0)
-                    ws_items.freeze_panes(1, 0)
-                    ws_inv.autofilter(0, 0, max(1, len(inv_df)), max(0, len(inv_df.columns) - 1))
-                    ws_items.autofilter(0, 0, max(1, len(items_df)), max(0, len(items_df.columns) - 1))
-
-                st.download_button(
-                    "Download Excel (Invoices + Items)",
-                    data=buffer.getvalue(),
-                    file_name="documents_filtered_export.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="explorer_export_all_xlsx_dl",
-                )
     # Fetch current page
     offset = (st.session_state.explorer_page - 1) * page_size
     invoices = db.search_invoices(limit=page_size, offset=offset, **filters)
@@ -531,10 +525,10 @@ def render_documents_explorer(db: DatabaseManager) -> None:
         # Export selected as CSV
         if selected_keys:
             export_df = edited_df[edited_df["Select"] == True].drop(columns=["Select"])  # type: ignore
-            csv = export_df.to_csv(index=False).encode("utf-8")
+            csv_data = export_df.to_csv(index=False).encode("utf-8")
             st.download_button(
                 "⬇️ Export selected (CSV)",
-                data=csv,
+                data=csv_data,
                 file_name="documents_export.csv",
                 mime="text/csv",
                 key="explorer_export_csv",

@@ -8,9 +8,12 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+import plotly.graph_objects as go
 import streamlit as st
 
 from src.agent.agent_core import create_agent
+from src.utils.agent_response_parser import AgentResponseParser
+from src.agent.chart_export_tool import get_pending_download, clear_pending_download
 import src.database.db as database_db
 
 # Configure logging
@@ -69,7 +72,7 @@ def init_agent(api_key: str) -> None:
             logger.info("Agent initialized successfully")
         except (ValueError, KeyError, RuntimeError) as e:
             logger.error(f"Failed to initialize agent: {e}", exc_info=True)
-            st.error(f"❌ Erro ao inicializar agente: {e}")
+            st.error(f"❌ Error initializing agent: {e}")
             st.session_state.agent = None
 
 
@@ -97,9 +100,94 @@ def get_cached_db(db_path: str) -> database_db.DatabaseManager:
             )
         except (OSError, ValueError, RuntimeError) as e:
             logger.error(f"Failed to initialize database: {e}")
-            st.error(f"❌ Erro ao conectar ao banco de dados: {e}")
+            st.error(f"❌ Error connecting to database: {e}")
             return None
     return st.session_state[db_key]
+
+
+def display_agent_response(response_text: str) -> None:
+    """
+    Display agent response with proper rendering of charts and downloads.
+    Cloud-compatible: uses in-memory BytesIO for all file operations.
+    
+    Args:
+        response_text: Full agent response to process and display
+    """
+    # Parse response into components
+    parsed = AgentResponseParser.parse_response(response_text)
+    
+    # Debug: log what was found
+    has_chart = parsed["chart"] is not None
+    has_file = parsed["file"] is not None
+    has_download = parsed["download"] is not None
+    logger.info(f"Parsed response - Chart: {has_chart}, File: {has_file}, Download: {has_download}, Text length: {len(parsed['text'])}")
+    
+    if has_chart:
+        logger.info(f"✓ Chart found with keys: {list(parsed['chart'].keys())}")
+    
+    if has_download:
+        logger.info(f"✓ Download marker found for: {parsed['download']['filename']}")
+    
+    # Render chart if present
+    if parsed["chart"]:
+        try:
+            logger.info(f"Rendering chart with st.plotly_chart()...")
+            st.plotly_chart(
+                parsed["chart"],
+                use_container_width=True,
+                key=f"chart_{hash(str(parsed['chart'])) % 10000}"
+            )
+            logger.info(f"✓ Chart rendered successfully")
+        except Exception as e:
+            logger.error(f"Error rendering chart: {e}", exc_info=True)
+            st.error(f"Error displaying chart: {e}")
+    
+    # Render text if present
+    if parsed["text"]:
+        st.markdown(parsed["text"])
+    
+    # Render download button if download marker found
+    if parsed["download"]:
+        download_info = parsed["download"]
+        filename = download_info["filename"]
+        mime_type = download_info["mime_type"]
+        
+        try:
+            # Retrieve the file bytes from pending downloads
+            download_data = get_pending_download(filename)
+            
+            if download_data:
+                file_bytes, actual_mime_type = download_data
+                
+                # Use mime_type from marker if available, otherwise from stored data
+                actual_mime = mime_type if mime_type else actual_mime_type
+                
+                logger.info(f"Rendering download button for: {filename} ({actual_mime})")
+                
+                # Render download button
+                st.download_button(
+                    label=f"📥 Download {filename}",
+                    data=file_bytes,
+                    file_name=filename,
+                    mime=actual_mime,
+                    key=f"download_{hash(filename) % 10000}"
+                )
+                
+                # Clear from storage after rendering
+                clear_pending_download(filename)
+                logger.info(f"✓ Download button rendered and file cleared from storage")
+            else:
+                st.warning(f"⚠️ File '{filename}' not found in storage. This may have already been downloaded.")
+                logger.warning(f"Download marker found but file not in storage: {filename}")
+                
+        except Exception as e:
+            logger.error(f"Error rendering download button: {e}", exc_info=True)
+            st.error(f"Error rendering download: {e}")
+    
+    # Render file info if traditional file reference found
+    if parsed["file"]:
+        file_info = parsed["file"]
+        st.info(f"📥 **File ready for download: {file_info['filename']}'")
 
 
 def main() -> None:
@@ -113,7 +201,7 @@ def main() -> None:
 
     # Sidebar for configuration
     with st.sidebar:
-        st.header("⚙️ Settings")
+        st.header("⚙️ Configuration")
 
         # API Key input
         api_key = st.text_input(
@@ -133,15 +221,19 @@ def main() -> None:
         st.divider()
 
         # System status
-        st.subheader("🔌 Status")
+        st.subheader("🔌 Connection")
         if api_key and st.session_state.get("agent"):
-            st.success("✅ Agent connected to Gemini")
+            st.success("✅ Connected to Gemini")
         elif api_key:
             st.warning("⏳ Initializing agent...")
         else:
-            st.warning("⚠️ No API Key (limited mode)")
+            st.warning("⚠️ No API Key provided")
 
         st.caption(f"💾 Database: {db_path}")
+
+    # Initialize tab selection in session state
+    if "selected_tab" not in st.session_state:
+        st.session_state.selected_tab = 0  # Default to Home tab
 
     # Native Streamlit tabs - no CSS complexity
     tab_home, tab_documents, tab_reports, tab_statistics = st.tabs(
@@ -152,7 +244,29 @@ def main() -> None:
     with tab_home:
         # Chat interface as primary interaction
         st.header("💬 Chat with Your Documents")
-        st.caption("Ask in natural language. Portuguese or English. Minimal answers, clear actions.")
+        st.caption("Ask ANY question in natural language. Portuguese or English.")
+        
+        # Info box about capabilities
+        with st.expander("💡 What can you ask?", expanded=False):
+            st.markdown("""
+            ### 📋 Questions about YOUR documents:
+            - "Quantas notas de compra temos?"
+            - "Mostre vendas de 2024"
+            - "Qual fornecedor tem mais compras?"
+            
+            ### 📚 General fiscal/accounting knowledge:
+            - "O que é ICMS?"
+            - "Como calcular IPI?"
+            - "Qual a diferença entre NFe e NFCe?"
+            - "O que é Simples Nacional?"
+            
+            ### 🌍 General knowledge:
+            - "Quem foi Albert Einstein?"
+            - "Como funciona a fotossíntese?"
+            - "O que é um arquivo XML?"
+            
+            **The agent can answer ANYTHING!** 🚀
+            """)
 
         # Initialize chat messages
         if "messages" not in st.session_state:
@@ -166,15 +280,14 @@ def main() -> None:
         # Display chat history
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+                display_agent_response(message["content"])
 
         # Chat input
-        if prompt := st.chat_input("Ask about your fiscal documents..."):
+        if prompt := st.chat_input("Ask about your fiscal documents, taxes, or anything else..."):
             # Check if agent is available
             if not st.session_state.get("agent"):
                 st.warning(
-                    "⚠️ Por favor, configure sua chave API do Gemini na barra lateral "
-                    "para usar o chat."
+                    "⚠️ Please configure your Gemini API key in the sidebar to use the chat."
                 )
             else:
                 # Add user message
@@ -184,39 +297,28 @@ def main() -> None:
 
                 # Get agent response
                 with st.chat_message("assistant"):
-                    with st.spinner("🤔 Pensando..."):
+                    with st.spinner("🤔 Thinking..."):
                         try:
                             response = st.session_state.agent.chat(prompt)
-                            st.markdown(response)
+                            
+                            # Debug: log the raw response for troubleshooting
+                            logger.info(f"Raw agent response ({len(response)} chars): {response[:200]}")
+                            if "```json" in response:
+                                logger.info("✓ Response contains ```json code fences")
+                            else:
+                                logger.warning("⚠️ Response does NOT contain ```json code fences")
+                            
+                            # Display agent response with proper rendering
+                            display_agent_response(response)
+                            
                             st.session_state.messages.append({"role": "assistant", "content": response})
                         except (ValueError, KeyError, RuntimeError, TimeoutError) as e:
-                            error_msg = f"❌ Erro ao processar mensagem: {str(e)}"
+                            error_msg = f"❌ Error processing message: {str(e)}"
                             st.error(error_msg)
                             logger.error(f"Chat error: {e}", exc_info=True)
 
-        # Quick Actions below chat
-        st.markdown("---")
-        st.markdown("#### Quick Actions")
-        st.caption("Navigate to key features")
-
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            if st.button("⬆️ Upload XMLs", use_container_width=True, type="secondary"):
-                st.switch_page("page_documents")
-        with c2:
-            if st.button("🔍 Search Documents", use_container_width=True, type="secondary"):
-                st.switch_page("page_documents")
-        with c3:
-            if st.button("📊 View Statistics", use_container_width=True, type="secondary"):
-                st.switch_page("page_statistics")
-        with c4:
-            if st.button("📈 Generate Report", use_container_width=True, type="secondary"):
-                st.switch_page("page_reports")
-
     # ============= DOCUMENTS TAB =============
     with tab_documents:
-        st.header("📄 Documents")
-
         # Upload Section - compact and collapsed by default
         with st.expander("⬆️ Upload Fiscal Documents", expanded=False):
             st.caption("Upload single XMLs, multiple files, or ZIP archives (NFe, NFCe, CTe, MDFe)")
@@ -224,7 +326,6 @@ def main() -> None:
             render_async_upload_tab()
 
         # Explorer section - main focus
-        st.subheader("🔍 Browse & Search")
         from src.ui.components.documents_explorer import render_documents_explorer
         
         db_docs = get_cached_db(db_path)
@@ -242,8 +343,6 @@ def main() -> None:
 
     # ============= STATISTICS TAB =============
     with tab_statistics:
-        st.header("📊 Statistics & Overview")
-
         # Database statistics
         try:
             db_stats_mgr = get_cached_db(db_path)
@@ -274,7 +373,7 @@ def main() -> None:
                     "Type": list(db_stats["by_type"].keys()),
                     "Count": list(db_stats["by_type"].values()),
                 }
-                st.bar_chart(type_df, x="Type", y="Count", use_container_width=True)
+                st.bar_chart(type_df, x="Type", y="Count", width='stretch')
             else:
                 st.info("No documents in database yet.")
 

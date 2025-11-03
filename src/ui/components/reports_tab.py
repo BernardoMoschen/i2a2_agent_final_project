@@ -18,7 +18,6 @@ def render_reports_tab(db: DatabaseManager):
     Args:
         db: Database manager instance
     """
-    st.header("📊 Reports & Analytics")
     st.markdown(
         "Generate Excel/CSV reports and visualizations from your fiscal documents database."
     )
@@ -27,7 +26,7 @@ def render_reports_tab(db: DatabaseManager):
     generator = ReportGenerator(db)
     
     # Report selection
-    st.subheader("📋 Report Type")
+    st.subheader("📋 Report Type", divider='gray')
     
     report_categories = {
         "Validation Reports": {
@@ -80,7 +79,7 @@ def render_reports_tab(db: DatabaseManager):
     report_type = [k for k, v in report_options.items() if v == report_display][0]
     
     # Filters section
-    st.subheader("🔍 Filters")
+    st.subheader("🔍 Filters", divider=True)
     
     col1, col2 = st.columns(2)
     
@@ -153,7 +152,7 @@ def render_reports_tab(db: DatabaseManager):
         issuer_cnpj = issuer_cnpj.strip() if issuer_cnpj else None
     
     # Output options
-    st.subheader("⚙️ Output Options")
+    st.subheader("⚙️ Output Options", divider='grey')
     
     col1, col2 = st.columns(2)
     
